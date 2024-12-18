@@ -47,7 +47,7 @@ source = "git+https://github.com/foundry-rs/starknet-foundry?tag=v0.21.0#2996b8c
 [[package]]
 name = "vesu"
 version = "0.1.0"
-source = "git+https://github.com/vesuxyz/vesu-v1#4fa5aefd5cc0b8a2320a4fd8f2e0586f594467fa"
+source = "git+https://github.com/vesuxyz/vesu-v1#78cf26dd88c309a9d267e5968030e927a60cffcb"
 dependencies = [
  "alexandria_math",
  "snforge_std",

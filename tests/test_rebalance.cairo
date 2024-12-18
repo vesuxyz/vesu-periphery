@@ -6,7 +6,7 @@ trait IStarkgateERC20<TContractState> {
 }
 
 #[cfg(test)]
-mod TestRebalance {
+mod Test_896150_Rebalance {
     use snforge_std::{
         start_prank, stop_prank, start_warp, stop_warp, CheatTarget, load, prank, CheatSpan
     };

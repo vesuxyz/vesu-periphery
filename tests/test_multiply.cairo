@@ -6,7 +6,7 @@ trait IStarkgateERC20<TContractState> {
 }
 
 #[cfg(test)]
-mod TestMultiply {
+mod Test_896150_Multiply {
     use snforge_std::{start_prank, stop_prank, start_warp, stop_warp, CheatTarget, load};
     use starknet::{
         ContractAddress, contract_address_const, get_block_timestamp, get_caller_address,

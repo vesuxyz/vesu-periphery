@@ -6,7 +6,7 @@ trait IStarkgateERC20<TContractState> {
 }
 
 #[cfg(test)]
-mod TestLiquidate {
+mod Test_896150_Liquidate {
     use snforge_std::{
         start_prank, stop_prank, start_warp, stop_warp, CheatTarget, load, store, prank, CheatSpan
     };
