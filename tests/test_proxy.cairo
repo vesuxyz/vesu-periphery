@@ -1,7 +1,7 @@
 use starknet::ContractAddress;
 
 #[cfg(test)]
-mod Test_VesuProxy {
+mod Test_Proxy {
     use snforge_std::{start_prank, stop_prank, start_warp, stop_warp, CheatTarget, load};
     use starknet::{
         ContractAddress, contract_address_const, get_block_timestamp, get_caller_address,
@@ -82,8 +82,76 @@ mod Test_VesuProxy {
 
     #[test]
     #[available_gas(20000000)]
+    #[should_panic(expected: "caller-not-manager")]
     #[fork("Mainnet")]
-    fn test_proxy() {
+    fn test_proxy_set_manager_caller_not_manager() {
+        let config = setup();
+        let TestConfig { proxy, .. } = config;
+
+        proxy.set_manager(get_caller_address());
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[fork("Mainnet")]
+    fn test_proxy_set_manager() {
+        let config = setup();
+        let TestConfig { manager, proxy, .. } = config;
+
+        assert!(proxy.manager() != get_caller_address());
+
+        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        proxy.set_manager(get_caller_address());
+        stop_prank(CheatTarget::One(proxy.contract_address));
+
+        assert!(proxy.manager() == get_caller_address());
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[should_panic(expected: "caller-not-manager")]
+    #[fork("Mainnet")]
+    fn test_proxy_set_caller_for_method_caller_not_manager() {
+        let config = setup();
+        let TestConfig { extension, proxy, pauser, .. } = config;
+
+        proxy.set_caller_for_method(pauser, extension.contract_address, selector!("singleton"));
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[fork("Mainnet")]
+    fn test_proxy_set_caller_for_method() {
+        let config = setup();
+        let TestConfig { extension, manager, proxy, pauser, .. } = config;
+
+        assert!(!proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
+
+        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        proxy.set_caller_for_method(pauser, extension.contract_address, selector!("singleton"));
+        stop_prank(CheatTarget::One(proxy.contract_address));
+
+        assert!(proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
+
+        start_prank(CheatTarget::One(proxy.contract_address), pauser);
+        proxy
+            .proxy_call(
+                array![
+                    Call {
+                        to: extension.contract_address,
+                        selector: selector!("singleton"),
+                        calldata: array![].span()
+                    }
+                ]
+                    .span()
+            );
+        stop_prank(CheatTarget::One(proxy.contract_address));
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[fork("Mainnet")]
+    fn test_proxy_proxy_call() {
         let config = setup();
         let TestConfig { eth, usdc, extension, pool_id, manager, proxy, .. } = config;
 
@@ -158,9 +226,9 @@ mod Test_VesuProxy {
     #[available_gas(20000000)]
     #[should_panic(expected: "caller-not-authorized")]
     #[fork("Mainnet")]
-    fn test_proxy_pauser_not_authorized() {
+    fn test_proxy_proxy_call_pauser_caller_not_authorized() {
         let config = setup();
-        let TestConfig { eth, usdc, extension, pool_id, manager, pauser, proxy, .. } = config;
+        let TestConfig { eth, usdc, extension, pool_id, pauser, proxy, .. } = config;
 
         start_prank(CheatTarget::One(proxy.contract_address), pauser);
 
@@ -195,7 +263,7 @@ mod Test_VesuProxy {
     #[test]
     #[available_gas(20000000)]
     #[fork("Mainnet")]
-    fn test_proxy_pauser() {
+    fn test_proxy_proxy_call_pauser() {
         let config = setup();
         let TestConfig { eth, usdc, extension, pool_id, manager, pauser, proxy, .. } = config;
 

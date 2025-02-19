@@ -11,6 +11,13 @@ impl ArrayExt<T, +Drop<T>, +Copy<T>> of ArrayExtTrait<T> {
 
 #[starknet::interface]
 pub trait IProxy<TContractState> {
+    fn manager(ref self: TContractState) -> ContractAddress;
+    fn access_control(
+        ref self: TContractState,
+        caller: ContractAddress,
+        contract: ContractAddress,
+        method: felt252
+    ) -> bool;
     fn set_caller_for_method(
         ref self: TContractState,
         caller: ContractAddress,
@@ -27,8 +34,7 @@ pub mod Proxy {
         account::Call, syscalls::call_contract_syscall, ContractAddress, get_caller_address
     };
     use vesu::singleton::{Singleton, ISingletonDispatcher, ISingletonDispatcherTrait};
-    use super::ArrayExt;
-    use super::IProxy;
+    use super::{ArrayExt, IProxy};
 
     #[storage]
     struct Storage {
@@ -68,6 +74,19 @@ pub mod Proxy {
 
     #[abi(embed_v0)]
     impl ProxyImpl of IProxy<ContractState> {
+        fn manager(ref self: ContractState) -> ContractAddress {
+            self.manager.read()
+        }
+
+        fn access_control(
+            ref self: ContractState,
+            caller: ContractAddress,
+            contract: ContractAddress,
+            method: felt252
+        ) -> bool {
+            self.access_control.read((caller, contract, method))
+        }
+
         fn set_caller_for_method(
             ref self: ContractState,
             caller: ContractAddress,
@@ -104,8 +123,8 @@ pub mod Proxy {
                     );
 
                     match call_contract_syscall(*call.to, *call.selector, *call.calldata) {
-                        Result::Ok(retdata) => {
-                            result.append(retdata);
+                        Result::Ok(return_data) => {
+                            result.append(return_data);
                             index += 1;
                         },
                         Result::Err(revert_reason) => {
