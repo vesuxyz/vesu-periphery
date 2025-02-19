@@ -11,7 +11,12 @@ impl ArrayExt<T, +Drop<T>, +Copy<T>> of ArrayExtTrait<T> {
 
 #[starknet::interface]
 pub trait IProxy<TContractState> {
-    fn set_caller_for_method(ref self: TContractState, contract: ContractAddress, method: felt252);
+    fn set_caller_for_method(
+        ref self: TContractState,
+        caller: ContractAddress,
+        contract: ContractAddress,
+        method: felt252
+    );
     fn set_manager(ref self: TContractState, new_manager: ContractAddress);
     fn proxy_call(ref self: TContractState, calls: Span<Call>) -> Array<Span<felt252>>;
 }
@@ -27,9 +32,8 @@ pub mod Proxy {
 
     #[storage]
     struct Storage {
-        singleton: ISingletonDispatcher,
         manager: ContractAddress,
-        access_control: LegacyMap<(ContractAddress, felt252), bool>
+        access_control: LegacyMap<(ContractAddress, ContractAddress, felt252), bool>
     }
 
     #[derive(Drop, starknet::Event)]
@@ -43,6 +47,8 @@ pub mod Proxy {
         #[key]
         caller: ContractAddress,
         #[key]
+        contract: ContractAddress,
+        #[key]
         selector: felt252,
         can_call: bool
     }
@@ -55,10 +61,7 @@ pub mod Proxy {
     }
 
     #[constructor]
-    fn constructor(
-        ref self: ContractState, singleton: ISingletonDispatcher, manager: ContractAddress
-    ) {
-        self.singleton.write(singleton);
+    fn constructor(ref self: ContractState, manager: ContractAddress) {
         self.manager.write(manager);
         self.emit(SetManager { manager });
     }
@@ -66,14 +69,17 @@ pub mod Proxy {
     #[abi(embed_v0)]
     impl ProxyImpl of IProxy<ContractState> {
         fn set_caller_for_method(
-            ref self: ContractState, contract: ContractAddress, method: felt252
+            ref self: ContractState,
+            caller: ContractAddress,
+            contract: ContractAddress,
+            method: felt252
         ) {
             assert!(get_caller_address() == self.manager.read(), "caller-not-manager");
-            self.access_control.write((contract, method), true);
+            self.access_control.write((caller, contract, method), true);
             self
                 .emit(
                     SetCallerForSelector {
-                        caller: get_caller_address(), selector: method, can_call: true
+                        caller: caller, contract: contract, selector: method, can_call: true
                     }
                 );
         }
@@ -91,7 +97,9 @@ pub mod Proxy {
                 .pop_front() {
                     assert!(
                         get_caller_address() == self.manager.read()
-                            || self.access_control.read((*call.to, *call.selector)),
+                            || self
+                                .access_control
+                                .read((get_caller_address(), *call.to, *call.selector)),
                         "caller-not-authorized"
                     );
 

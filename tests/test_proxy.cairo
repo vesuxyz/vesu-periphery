@@ -31,10 +31,18 @@ mod Test_VesuProxy {
     use vesu_periphery::swap::{RouteNode, TokenAmount, Swap};
     use vesu_periphery::proxy::{IProxyDispatcher, IProxyDispatcherTrait};
 
-    #[test]
-    #[available_gas(20000000)]
-    #[fork("Mainnet")]
-    fn test_proxy() {
+    struct TestConfig {
+        eth: IERC20Dispatcher,
+        usdc: IERC20Dispatcher,
+        singleton: ISingletonDispatcher,
+        extension: IDefaultExtensionDispatcher,
+        pool_id: felt252,
+        manager: ContractAddress,
+        pauser: ContractAddress,
+        proxy: IProxyDispatcher,
+    }
+
+    fn setup() -> TestConfig {
         let eth = IERC20Dispatcher {
             contract_address: contract_address_const::<
                 0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
@@ -59,23 +67,146 @@ mod Test_VesuProxy {
         };
 
         let manager = extension.pool_owner(pool_id);
-        let caller = contract_address_const::<'0x1'>();
+        let pauser = contract_address_const::<'0x1'>();
 
         let proxy = IProxyDispatcher {
-            contract_address: deploy_with_args(
-                "Proxy", array![singleton.contract_address.into(), manager.into()]
-            )
+            contract_address: deploy_with_args("Proxy", array![manager.into()])
         };
 
         start_prank(CheatTarget::One(extension.contract_address), manager);
         extension.set_pool_owner(pool_id, proxy.contract_address);
         stop_prank(CheatTarget::One(extension.contract_address));
 
-        start_prank(CheatTarget::One(proxy.contract_address), manager);
-        proxy.set_caller_for_method(caller, 'set_debt_cap');
-        stop_prank(CheatTarget::One(proxy.contract_address));
+        TestConfig { eth, usdc, singleton, extension, pool_id, manager, pauser, proxy, }
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[fork("Mainnet")]
+    fn test_proxy() {
+        let config = setup();
+        let TestConfig { eth, usdc, extension, pool_id, manager, proxy, .. } = config;
 
         start_prank(CheatTarget::One(proxy.contract_address), manager);
+
+        let mut ltv_config_serialized = array![];
+        LTVConfig { max_ltv: 0 }.serialize(ref ltv_config_serialized);
+
+        let mut calldata = array![
+            pool_id, usdc.contract_address.into(), eth.contract_address.into(),
+        ];
+
+        while !ltv_config_serialized
+            .is_empty() {
+                let item = ltv_config_serialized.pop_front().unwrap();
+                calldata.append(item);
+            };
+
+        proxy
+            .proxy_call(
+                array![
+                    Call {
+                        to: extension.contract_address,
+                        selector: selector!("set_shutdown_ltv_config"),
+                        calldata: calldata.span()
+                    }
+                ]
+                    .span()
+            );
+
+        stop_prank(CheatTarget::One(proxy.contract_address));
+
+        let shutdown_mode = extension
+            .update_shutdown_status(pool_id, usdc.contract_address, eth.contract_address);
+        assert!(shutdown_mode == ShutdownMode::Recovery);
+
+        start_prank(CheatTarget::One(proxy.contract_address), manager);
+
+        let mut ltv_config_serialized = array![];
+        LTVConfig { max_ltv: SCALE.try_into().unwrap() }.serialize(ref ltv_config_serialized);
+
+        let mut calldata = array![
+            pool_id, usdc.contract_address.into(), eth.contract_address.into(),
+        ];
+
+        while !ltv_config_serialized
+            .is_empty() {
+                let item = ltv_config_serialized.pop_front().unwrap();
+                calldata.append(item);
+            };
+
+        proxy
+            .proxy_call(
+                array![
+                    Call {
+                        to: extension.contract_address,
+                        selector: selector!("set_shutdown_ltv_config"),
+                        calldata: calldata.span()
+                    }
+                ]
+                    .span()
+            );
+
+        stop_prank(CheatTarget::One(proxy.contract_address));
+
+        let shutdown_mode = extension
+            .update_shutdown_status(pool_id, usdc.contract_address, eth.contract_address);
+        assert!(shutdown_mode == ShutdownMode::None);
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[should_panic(expected: "caller-not-authorized")]
+    #[fork("Mainnet")]
+    fn test_proxy_pauser_not_authorized() {
+        let config = setup();
+        let TestConfig { eth, usdc, extension, pool_id, manager, pauser, proxy, .. } = config;
+
+        start_prank(CheatTarget::One(proxy.contract_address), pauser);
+
+        let mut ltv_config_serialized = array![];
+        LTVConfig { max_ltv: 0 }.serialize(ref ltv_config_serialized);
+
+        let mut calldata = array![
+            pool_id, usdc.contract_address.into(), eth.contract_address.into(),
+        ];
+
+        while !ltv_config_serialized
+            .is_empty() {
+                let item = ltv_config_serialized.pop_front().unwrap();
+                calldata.append(item);
+            };
+
+        proxy
+            .proxy_call(
+                array![
+                    Call {
+                        to: extension.contract_address,
+                        selector: selector!("set_shutdown_ltv_config"),
+                        calldata: calldata.span()
+                    }
+                ]
+                    .span()
+            );
+
+        stop_prank(CheatTarget::One(proxy.contract_address));
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[fork("Mainnet")]
+    fn test_proxy_pauser() {
+        let config = setup();
+        let TestConfig { eth, usdc, extension, pool_id, manager, pauser, proxy, .. } = config;
+
+        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        proxy
+            .set_caller_for_method(
+                pauser, extension.contract_address, selector!("set_shutdown_ltv_config")
+            );
+        stop_prank(CheatTarget::One(proxy.contract_address));
+
+        start_prank(CheatTarget::One(proxy.contract_address), pauser);
 
         let mut ltv_config_serialized = array![];
         LTVConfig { max_ltv: 0 }.serialize(ref ltv_config_serialized);
