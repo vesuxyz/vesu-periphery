@@ -19,7 +19,8 @@ pub trait IProxy<TContractState> {
         ref self: TContractState,
         caller: ContractAddress,
         contract: ContractAddress,
-        method: felt252
+        method: felt252,
+        can_call: bool
     );
     fn set_manager(ref self: TContractState, new_manager: ContractAddress);
     fn proxy_call(ref self: TContractState, calls: Span<Call>) -> Array<Span<felt252>>;
@@ -88,14 +89,15 @@ pub mod Proxy {
             ref self: ContractState,
             caller: ContractAddress,
             contract: ContractAddress,
-            method: felt252
+            method: felt252,
+            can_call: bool
         ) {
             assert!(get_caller_address() == self.manager.read(), "caller-not-manager");
-            self.access_control.write((caller, contract, method), true);
+            self.access_control.write((caller, contract, method), can_call);
             self
                 .emit(
                     SetCallerForSelector {
-                        caller: caller, contract: contract, selector: method, can_call: true
+                        caller: caller, contract: contract, selector: method, can_call: can_call
                     }
                 );
         }

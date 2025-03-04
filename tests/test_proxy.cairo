@@ -115,7 +115,10 @@ mod Test_Proxy {
         let config = setup();
         let TestConfig { extension, proxy, pauser, .. } = config;
 
-        proxy.set_caller_for_method(pauser, extension.contract_address, selector!("singleton"));
+        proxy
+            .set_caller_for_method(
+                pauser, extension.contract_address, selector!("singleton"), true
+            );
     }
 
     #[test]
@@ -128,7 +131,10 @@ mod Test_Proxy {
         assert!(!proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
 
         start_prank(CheatTarget::One(proxy.contract_address), manager);
-        proxy.set_caller_for_method(pauser, extension.contract_address, selector!("singleton"));
+        proxy
+            .set_caller_for_method(
+                pauser, extension.contract_address, selector!("singleton"), true
+            );
         stop_prank(CheatTarget::One(proxy.contract_address));
 
         assert!(proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
@@ -270,7 +276,7 @@ mod Test_Proxy {
         start_prank(CheatTarget::One(proxy.contract_address), manager);
         proxy
             .set_caller_for_method(
-                pauser, extension.contract_address, selector!("set_shutdown_ltv_config")
+                pauser, extension.contract_address, selector!("set_shutdown_ltv_config"), true
             );
         stop_prank(CheatTarget::One(proxy.contract_address));
 
