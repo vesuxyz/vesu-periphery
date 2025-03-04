@@ -431,9 +431,9 @@ v8-compile-cache-lib@^3.0.1:
   resolved "https://registry.yarnpkg.com/v8-compile-cache-lib/-/v8-compile-cache-lib-3.0.1.tgz#6336e8d71965cb3d35a1bbb7868445a7c05264bf"
   integrity sha512-wa7YjyUGfNZngI/vtK0UHAN+lgDCxBPCylVXGp0zu59Fz5aiGtNXaq3DhIov063MorB+VfufLh3JlF2KdTK3xg==
 
-"vesu_changelog@https://github.com/vesuxyz/changelog.git#aadef8272d3ad429957d3a797afc933e2834a7fe":
+"vesu_changelog@https://github.com/vesuxyz/changelog.git#40a487c8f46ab5396117230ad56e49aff52379c5":
   version "0.0.0"
-  resolved "https://github.com/vesuxyz/changelog.git#aadef8272d3ad429957d3a797afc933e2834a7fe"
+  resolved "https://github.com/vesuxyz/changelog.git#40a487c8f46ab5396117230ad56e49aff52379c5"
 
 webidl-conversions@^3.0.0:
   version "3.0.1"
