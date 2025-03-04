@@ -1,11 +1,7 @@
-import fs from "fs";
-import CONFIG from "vesu_changelog/configurations/config_genesis_sn_main.json" assert { type: "json" };
+import { CairoCustomEnum } from "starknet";
+import CONFIG from "vesu_changelog/configurations/config_genesis_sn_sepolia.json" assert { type: "json" };
+import DEPLOYMENT from "vesu_changelog/deployments/deployment_sn_sepolia.json" assert { type: "json" };
 import { Config, EnvAssetParams, PERCENT, SCALE, toScale, toUtilizationScale } from ".";
-
-let DEPLOYMENT: any = {};
-try {
-  DEPLOYMENT = JSON.parse(fs.readFileSync(`deployment-0x534e5f5345504f4c4941.json`, "utf-8"));
-} catch (error) {}
 
 function price(symbol: string) {
   switch (symbol) {
@@ -33,7 +29,7 @@ const env = CONFIG.asset_parameters.map(
       asset.token.symbol,
       BigInt(asset.token.decimals),
       toScale(10000),
-      asset.oracle.pragma_key,
+      asset.pragma.pragma_key,
       price(asset.token.symbol),
       asset.token.is_legacy,
       BigInt(asset.fee_rate),
@@ -46,20 +42,28 @@ const env = CONFIG.asset_parameters.map(
 export const config: Config = {
   name: "sepolia",
   protocol: {
-    singleton: "0x69d0eca40cb01eda7f3d76281ef524cecf8c35f4ca5acc862ff128e7432964b",// DEPLOYMENT.singleton || "0x0",
-    extension: DEPLOYMENT.extension || "0x0",
-    oracle: DEPLOYMENT.oracle || "0x0",
-    ekubo: "0x0444a09d96389aa7148f1aada508e30b71299ffe650d9c97fdaae38cb9a23384"
+    singleton: DEPLOYMENT.singleton || "0x0",
+    extensionPO: DEPLOYMENT.extensionPO || "0x0",
+    extensionCL: DEPLOYMENT.extensionPO || "0x0",
+    pragma: {
+      oracle: DEPLOYMENT.pragma.oracle || CONFIG.asset_parameters[0].pragma.oracle || "0x0",
+      summary_stats: DEPLOYMENT.pragma.summary_stats || CONFIG.asset_parameters[0].pragma.summary_stats || "0x0",
+    },
+    ekubo: {
+      core: DEPLOYMENT.ekubo.core || "0x0",
+    }
   },
   env,
   pools: {
     "genesis-pool": {
-      id: 1n,
+      // id: 1n,
+      id: 843471078868109043994407045333485539726819752573207893362353166067597145284n, // Genesis Pool
       description: "",
       type: "",
       params: {
+        pool_name: "Genesis Pool",
         asset_params: CONFIG.asset_parameters.map((asset: any) => ({
-          asset: "0x0",
+          asset: asset.token.address,
           floor: toScale(asset.floor),
           initial_rate_accumulator: SCALE,
           initial_full_utilization_rate: toScale(asset.initial_full_utilization_rate),
@@ -91,9 +95,12 @@ export const config: Config = {
           target_rate_percent: toScale(asset.target_rate_percent),
         })),
         pragma_oracle_params: CONFIG.asset_parameters.map((asset: any) => ({
-          pragma_key: asset.oracle.pragma_key,
-          timeout: 0n, // BigInt(asset.oracle.timeout),
-          number_of_sources: 0n, // BigInt(asset.oracle.number_of_sources),
+          pragma_key: asset.pragma.pragma_key,
+          timeout: 0n, // BigInt(asset.pragma.timeout),
+          number_of_sources: 0n, // BigInt(asset.pragma.number_of_sources),
+          start_time_offset: 0n, // BigInt(asset.pragma.start_time_offset),
+          time_window: 0n, // BigInt(asset.pragma.time_window),
+          aggregation_mode: new CairoCustomEnum({ Median: {} }), // new CairoCustomEnum({ [(asset.pragma.aggregation_mode == 0) ? "Median" : "Error"]: {} })
         })),
         liquidation_params: CONFIG.pair_parameters.map((pair: any) => {
           const collateral_asset_index = CONFIG.asset_parameters.findIndex(
@@ -103,6 +110,15 @@ export const config: Config = {
             (asset: any) => asset.asset_name === pair.debt_asset_name,
           );
           return { collateral_asset_index, debt_asset_index, liquidation_factor: toScale(pair.liquidation_discount) };
+        }),
+        debt_caps_params: CONFIG.pair_parameters.map((pair: any) => {
+          const collateral_asset_index = CONFIG.asset_parameters.findIndex(
+            (asset: any) => asset.asset_name === pair.collateral_asset_name,
+          );
+          const debt_asset_index = CONFIG.asset_parameters.findIndex(
+            (asset: any) => asset.asset_name === pair.debt_asset_name,
+          );
+          return { collateral_asset_index, debt_asset_index, debt_cap: toScale(pair.debt_cap) };
         }),
         shutdown_params: {
           recovery_period: BigInt(CONFIG.pool_parameters.recovery_period),

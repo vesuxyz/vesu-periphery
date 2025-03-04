@@ -5,7 +5,7 @@ const deployer = await setup(process.env.NETWORK);
 
 const [liquidate, calls] = await deployer.deferContract(
   "Liquidate",
-  CallData.compile({ core: deployer.config.protocol.ekubo!, singleton: deployer.config.protocol.singleton! }),
+  CallData.compile({ core: deployer.config.protocol.ekubo.core!, singleton: deployer.config.protocol.singleton! }),
 );
 
 let response = await deployer.execute([...calls]);
