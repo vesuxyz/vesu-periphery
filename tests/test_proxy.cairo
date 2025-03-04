@@ -152,6 +152,70 @@ mod Test_Proxy {
                     .span()
             );
         stop_prank(CheatTarget::One(proxy.contract_address));
+
+        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        proxy
+            .set_caller_for_method(
+                pauser, extension.contract_address, selector!("singleton"), false
+            );
+        stop_prank(CheatTarget::One(proxy.contract_address));
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[should_panic(expected: "caller-not-authorized")]
+    #[fork("Mainnet")]
+    fn test_proxy_set_caller_for_method_caller_not_authorized() {
+        let config = setup();
+        let TestConfig { extension, manager, proxy, pauser, .. } = config;
+
+        assert!(!proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
+
+        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        proxy
+            .set_caller_for_method(
+                pauser, extension.contract_address, selector!("singleton"), true
+            );
+        stop_prank(CheatTarget::One(proxy.contract_address));
+
+        assert!(proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
+
+        start_prank(CheatTarget::One(proxy.contract_address), pauser);
+        proxy
+            .proxy_call(
+                array![
+                    Call {
+                        to: extension.contract_address,
+                        selector: selector!("singleton"),
+                        calldata: array![].span()
+                    }
+                ]
+                    .span()
+            );
+        stop_prank(CheatTarget::One(proxy.contract_address));
+
+        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        proxy
+            .set_caller_for_method(
+                pauser, extension.contract_address, selector!("singleton"), false
+            );
+        stop_prank(CheatTarget::One(proxy.contract_address));
+
+        assert!(!proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
+
+        start_prank(CheatTarget::One(proxy.contract_address), pauser);
+
+        proxy
+            .proxy_call(
+                array![
+                    Call {
+                        to: extension.contract_address,
+                        selector: selector!("singleton"),
+                        calldata: array![].span()
+                    }
+                ]
+                    .span()
+            );
     }
 
     #[test]
