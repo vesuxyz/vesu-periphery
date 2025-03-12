@@ -52,6 +52,9 @@ pub struct DecreaseLeverParams {
 
 #[starknet::interface]
 pub trait IMultiply<TContractState> {
+    fn set_fee_owner(ref self: TContractState, fee_owner: ContractAddress);
+    fn fee_owner(self: @TContractState) -> ContractAddress;
+    fn fee_rate(self: @TContractState) -> u128;
     fn modify_lever(
         ref self: TContractState, modify_lever_params: ModifyLeverParams
     ) -> ModifyLeverResponse;
@@ -60,6 +63,8 @@ pub trait IMultiply<TContractState> {
 #[starknet::contract]
 pub mod Multiply {
     use starknet::{ContractAddress, get_contract_address, get_caller_address};
+
+    use core::num::traits::{Zero};
 
     use ekubo::{
         components::{shared_locker::{consume_callback_data, handle_delta, call_core_with_callback}},
@@ -91,7 +96,14 @@ pub mod Multiply {
     #[storage]
     struct Storage {
         core: ICoreDispatcher,
-        singleton: ISingletonDispatcher
+        singleton: ISingletonDispatcher,
+        fee_owner: ContractAddress,
+        fee_rate: u128
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct SetOwner {
+        fee_owner: ContractAddress
     }
 
     #[derive(Drop, starknet::Event)]
@@ -127,16 +139,23 @@ pub mod Multiply {
     #[event]
     #[derive(Drop, starknet::Event)]
     enum Event {
+        SetOwner: SetOwner,
         IncreaseLever: IncreaseLever,
         DecreaseLever: DecreaseLever
     }
 
     #[constructor]
     fn constructor(
-        ref self: ContractState, core: ICoreDispatcher, singleton: ISingletonDispatcher
+        ref self: ContractState,
+        core: ICoreDispatcher,
+        singleton: ISingletonDispatcher,
+        fee_owner: ContractAddress,
+        fee_rate: u128
     ) {
         self.core.write(core);
         self.singleton.write(singleton);
+        self.fee_owner.write(fee_owner);
+        self.fee_rate.write(fee_rate);
     }
 
     #[generate_trait]
@@ -209,7 +228,7 @@ pub mod Multiply {
             // for depositing an exact amount of collateral:
             //   - input token: collateral asset and output token: debt asset, since we specify a negative input amount
             //     of the collateral asset (swap direction is reversed)
-            let (debt_amount, collateral_amount) = if lever_swap.len() != 0 {
+            let (debt_amount, mut collateral_amount) = if lever_swap.len() != 0 {
                 swap(core, lever_swap.clone(), lever_swap_limit_amount)
             } else {
                 (
@@ -230,6 +249,18 @@ pub mod Multiply {
                 i129_new(collateral_amount.amount.mag, true),
                 get_contract_address()
             );
+
+            // charge swap fee on the collateral amount to deposit
+            let fee = self.fee_rate.read() * collateral_amount.amount.mag / SCALE_128;
+            if fee > 0 {
+                assert!(self.fee_owner.read() != Zero::zero(), "zero-fee-recipient");
+                collateral_amount.amount.mag -= fee;
+                assert!(
+                    IERC20Dispatcher { contract_address: collateral_asset }
+                        .transfer(self.fee_owner.read(), fee.into()),
+                    "transfer-failed"
+                );
+            }
 
             let singleton = self.singleton.read();
 
@@ -314,12 +345,19 @@ pub mod Multiply {
 
             let core = self.core.read();
 
+            // fee is either added to the swap output amount if the position gets closed or simply deducted from the
+            // repaid debt amount (less debt is repaid)
+            let mut fee: u128 = 0;
+
             if close_position {
                 assert_empty_token_amounts(lever_swap.clone());
-
                 let singleton = self.singleton.read();
-                let (_, _, debt) = singleton.position(pool_id, collateral_asset, debt_asset, user);
-
+                let (_, _, mut debt) = singleton
+                    .position(pool_id, collateral_asset, debt_asset, user);
+                // apply fee on the total debt since it's equal to the swap output amount
+                fee = (debt.try_into().unwrap() * self.fee_rate.read().into()) / SCALE_128;
+                // increase the required swap output amount by the fee
+                debt = debt + fee.into();
                 // apply weights to lever_swap token amounts
                 lever_swap =
                     apply_weights(
@@ -335,7 +373,7 @@ pub mod Multiply {
             // for repaying an exact amount of debt:
             //   - input token: debt asset and output token: collateral asset, since we specify a negative input amount
             //     of the debt asset (swap direction is reversed)
-            let (collateral_amount, debt_amount) = if lever_swap.len() != 0 {
+            let (collateral_amount, mut debt_amount) = if lever_swap.len() != 0 {
                 swap(core, lever_swap.clone(), lever_swap_limit_amount)
             } else {
                 (
@@ -356,6 +394,24 @@ pub mod Multiply {
                 i129_new(debt_amount.amount.mag, true),
                 get_contract_address()
             );
+
+            if !close_position {
+                // apply fee on the repaid debt amount since it's equal to the swap output amount
+                fee = self.fee_rate.read() * debt_amount.amount.mag / SCALE_128;
+            }
+
+            // deduct fee from repaid debt amount
+            // (in case of close_position, debt_amount will be reduced to the position's debt)
+            debt_amount.amount.mag -= fee;
+
+            if fee > 0 {
+                assert!(self.fee_owner.read() != Zero::zero(), "zero-fee-recipient");
+                assert!(
+                    IERC20Dispatcher { contract_address: debt_asset }
+                        .transfer(self.fee_owner.read(), fee.into()),
+                    "transfer-failed"
+                );
+            }
 
             let singleton = self.singleton.read();
 
@@ -500,6 +556,20 @@ pub mod Multiply {
 
     #[abi(embed_v0)]
     impl MultiplyImpl of IMultiply<ContractState> {
+        fn set_fee_owner(ref self: ContractState, fee_owner: ContractAddress) {
+            assert!(get_caller_address() == self.fee_owner.read(), "caller-not-fee_owner");
+            self.fee_owner.write(fee_owner);
+            self.emit(SetOwner { fee_owner });
+        }
+
+        fn fee_owner(self: @ContractState) -> ContractAddress {
+            self.fee_owner.read()
+        }
+
+        fn fee_rate(self: @ContractState) -> u128 {
+            self.fee_rate.read()
+        }
+
         fn modify_lever(
             ref self: ContractState, modify_lever_params: ModifyLeverParams
         ) -> ModifyLeverResponse {

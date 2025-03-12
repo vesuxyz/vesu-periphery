@@ -50,9 +50,12 @@ mod Test_896150_Multiply {
         usdc: IERC20Dispatcher,
         usdt: IERC20Dispatcher,
         user: ContractAddress,
+        fee_owner: ContractAddress
     }
 
-    fn setup() -> TestConfig {
+    fn setup(fee_rate: u128) -> TestConfig {
+        let fee_owner = contract_address_const::<0x1>();
+
         let ekubo = ICoreDispatcher {
             contract_address: contract_address_const::<
                 0x00000005dd3D2F4429AF886cD1a3b08289DBcEa99A294197E9eB43b0e0325b4b
@@ -63,10 +66,16 @@ mod Test_896150_Multiply {
                 0x2545b2e5d519fc230e9cd781046d3a64e092114f07e44771e0d719d148725ef
             >()
         };
+
+        let constructor_args: Array<felt252> = array![
+            ekubo.contract_address.into(),
+            singleton.contract_address.into(),
+            fee_owner.into(),
+            fee_rate.into()
+        ];
+
         let multiply = IMultiplyDispatcher {
-            contract_address: deploy_with_args(
-                "Multiply", array![ekubo.contract_address.into(), singleton.contract_address.into()]
-            )
+            contract_address: deploy_with_args("Multiply", constructor_args)
         };
 
         let eth = IERC20Dispatcher {
@@ -141,6 +150,7 @@ mod Test_896150_Multiply {
         stop_prank(CheatTarget::One(usdt.contract_address));
 
         let test_config = TestConfig {
+            fee_owner,
             ekubo,
             singleton,
             multiply,
@@ -162,7 +172,7 @@ mod Test_896150_Multiply {
     #[available_gas(20000000)]
     #[fork("Mainnet")]
     fn test_modify_lever_no_lever_swap() {
-        let TestConfig { singleton, multiply, pool_id, eth, usdc, user, .. } = setup();
+        let TestConfig { singleton, multiply, pool_id, eth, usdc, user, .. } = setup(0);
 
         let usdc_balance_before = usdc.balanceOf(user);
 
@@ -200,7 +210,7 @@ mod Test_896150_Multiply {
     #[available_gas(20000000)]
     #[fork("Mainnet")]
     fn test_modify_lever_exact_collateral_deposit() {
-        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup();
+        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup(0);
 
         let usdc_balance_before = usdc.balanceOf(user);
 
@@ -252,8 +262,66 @@ mod Test_896150_Multiply {
     #[test]
     #[available_gas(20000000)]
     #[fork("Mainnet")]
+    fn test_modify_lever_exact_collateral_deposit_with_fee() {
+        let fee_rate = 100000000000000000_u256;
+        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup(
+            fee_rate.try_into().unwrap()
+        );
+
+        let usdc_balance_before = usdc.balanceOf(user);
+
+        usdc.approve(multiply.contract_address, 10000_000_000.into());
+        singleton.modify_delegation(pool_id, multiply.contract_address, true);
+
+        let increase_lever_params = IncreaseLeverParams {
+            pool_id,
+            collateral_asset: usdc.contract_address,
+            debt_asset: eth.contract_address,
+            user,
+            add_margin: 10000_000_000_u128,
+            margin_swap: array![],
+            margin_swap_limit_amount: 0,
+            lever_swap: array![
+                Swap {
+                    route: array![
+                        RouteNode {
+                            pool_key, sqrt_ratio_limit: MIN_SQRT_RATIO_LIMIT, skip_ahead: 0
+                        }
+                    ],
+                    token_amount: TokenAmount {
+                        token: usdc.contract_address,
+                        amount: i129_new((110_000_000).try_into().unwrap(), true)
+                    }
+                }
+            ],
+            lever_swap_limit_amount: 44000000000000000, // 0.044 ETH
+        };
+
+        let modify_lever_params = ModifyLeverParams {
+            action: ModifyLeverAction::IncreaseLever(increase_lever_params.clone())
+        };
+
+        multiply.modify_lever(modify_lever_params);
+
+        let (_, collateral, _) = singleton
+            .position(pool_id, usdc.contract_address, eth.contract_address, user);
+
+        let y: @Swap = (increase_lever_params.lever_swap[0]);
+        let x: u256 = (*y.token_amount.amount.mag).into();
+        assert!(
+            collateral + 1 == increase_lever_params.add_margin.into() + x - (x * fee_rate / SCALE)
+        );
+
+        assert!(
+            usdc.balanceOf(user) == usdc_balance_before - increase_lever_params.add_margin.into()
+        );
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[fork("Mainnet")]
     fn test_modify_lever_exact_debt_borrow() {
-        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup();
+        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup(0);
 
         let usdc_balance_before = usdc.balanceOf(user);
 
@@ -316,7 +384,9 @@ mod Test_896150_Multiply {
         usdt,
         user,
         .. } =
-            setup();
+            setup(
+            0
+        );
 
         let usdt_balance_before = usdt.balanceOf(user);
 
@@ -394,7 +464,9 @@ mod Test_896150_Multiply {
         usdt,
         user,
         .. } =
-            setup();
+            setup(
+            0
+        );
 
         let usdt_balance_before = usdt.balanceOf(user);
 
@@ -465,7 +537,7 @@ mod Test_896150_Multiply {
     #[available_gas(20000000)]
     #[fork("Mainnet")]
     fn test_modify_lever_exact_collateral_withdrawal() {
-        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup();
+        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup(0);
 
         usdc.approve(multiply.contract_address, 10000_000_000.into());
         singleton.modify_delegation(pool_id, multiply.contract_address, true);
@@ -553,7 +625,7 @@ mod Test_896150_Multiply {
     #[available_gas(20000000)]
     #[fork("Mainnet")]
     fn test_modify_lever_exact_collateral_withdrawal_no_lever_swap() {
-        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup();
+        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup(0);
 
         usdc.approve(multiply.contract_address, 10000_000_000.into());
         singleton.modify_delegation(pool_id, multiply.contract_address, true);
@@ -626,7 +698,7 @@ mod Test_896150_Multiply {
     #[available_gas(20000000)]
     #[fork("Mainnet")]
     fn test_modify_lever_exact_debt_repay() {
-        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup();
+        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup(0);
 
         usdc.approve(multiply.contract_address, 10000_000_000.into());
         singleton.modify_delegation(pool_id, multiply.contract_address, true);
@@ -715,6 +787,100 @@ mod Test_896150_Multiply {
     #[test]
     #[available_gas(20000000)]
     #[fork("Mainnet")]
+    fn test_modify_lever_exact_debt_repay_with_fee() {
+        let fee_rate = 100000000000000000_u256;
+        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup(
+            fee_rate.try_into().unwrap()
+        );
+
+        usdc.approve(multiply.contract_address, 10000_000_000.into());
+        singleton.modify_delegation(pool_id, multiply.contract_address, true);
+
+        let increase_lever_params = IncreaseLeverParams {
+            pool_id,
+            collateral_asset: usdc.contract_address,
+            debt_asset: eth.contract_address,
+            user,
+            add_margin: 10000_000_000_u128,
+            margin_swap: array![],
+            margin_swap_limit_amount: 0,
+            lever_swap: array![
+                Swap {
+                    route: array![
+                        RouteNode {
+                            pool_key, sqrt_ratio_limit: MIN_SQRT_RATIO_LIMIT, skip_ahead: 0
+                        }
+                    ],
+                    token_amount: TokenAmount {
+                        token: usdc.contract_address,
+                        amount: i129_new((110_000_000).try_into().unwrap(), true)
+                    }
+                }
+            ],
+            lever_swap_limit_amount: 44000000000000000, // 0.044 ETH
+        };
+
+        let modify_lever_params = ModifyLeverParams {
+            action: ModifyLeverAction::IncreaseLever(increase_lever_params.clone())
+        };
+
+        multiply.modify_lever(modify_lever_params);
+
+        let usdc_balance_before = usdc.balanceOf(user);
+
+        let (_, _, debt_amount) = singleton
+            .position(pool_id, usdc.contract_address, eth.contract_address, user);
+
+        let decrease_lever_params = DecreaseLeverParams {
+            pool_id,
+            collateral_asset: usdc.contract_address,
+            debt_asset: eth.contract_address,
+            user,
+            sub_margin: 5000_000_000_u128,
+            recipient: user,
+            lever_swap: array![
+                Swap {
+                    route: array![
+                        RouteNode {
+                            pool_key, sqrt_ratio_limit: MAX_SQRT_RATIO_LIMIT, skip_ahead: 0
+                        }
+                    ],
+                    token_amount: TokenAmount {
+                        token: eth.contract_address,
+                        amount: i129_new((debt_amount / 100).try_into().unwrap(), true)
+                    }
+                }
+            ],
+            lever_swap_limit_amount: 121_000_000_u128,
+            lever_swap_weights: array![],
+            withdraw_swap: array![],
+            withdraw_swap_limit_amount: 0,
+            withdraw_swap_weights: array![],
+            close_position: false,
+        };
+
+        let modify_lever_params = ModifyLeverParams {
+            action: ModifyLeverAction::DecreaseLever(decrease_lever_params.clone())
+        };
+
+        multiply.modify_lever(modify_lever_params);
+
+        let (_, _, debt) = singleton
+            .position(pool_id, usdc.contract_address, eth.contract_address, user);
+
+        let lever_swap: @Swap = (decrease_lever_params.lever_swap[0]);
+        let lever_swap_amount: u256 = (*lever_swap.token_amount.amount.mag).into();
+        assert!(
+            debt == debt_amount - (lever_swap_amount - (lever_swap_amount * fee_rate / SCALE)) + 1
+        );
+        assert!(
+            usdc.balanceOf(user) == usdc_balance_before + decrease_lever_params.sub_margin.into()
+        );
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[fork("Mainnet")]
     fn test_modify_lever_withdraw_swap_exact_in() {
         let TestConfig { singleton,
         multiply,
@@ -726,7 +892,9 @@ mod Test_896150_Multiply {
         usdt,
         user,
         .. } =
-            setup();
+            setup(
+            0
+        );
 
         usdc.approve(multiply.contract_address, 10000_000_000.into());
         singleton.modify_delegation(pool_id, multiply.contract_address, true);
@@ -833,7 +1001,7 @@ mod Test_896150_Multiply {
     #[should_panic(expected: "weight-sum-not-1")]
     #[fork("Mainnet")]
     fn test_modify_lever_close_weight_sum_not_1() {
-        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup();
+        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup(0);
 
         usdc.approve(multiply.contract_address, 10000_000_000.into());
         singleton.modify_delegation(pool_id, multiply.contract_address, true);
@@ -906,7 +1074,7 @@ mod Test_896150_Multiply {
     #[available_gas(20000000)]
     #[fork("Mainnet")]
     fn test_modify_lever_close() {
-        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup();
+        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup(0);
 
         usdc.approve(multiply.contract_address, 10000_000_000.into());
         singleton.modify_delegation(pool_id, multiply.contract_address, true);
@@ -998,6 +1166,102 @@ mod Test_896150_Multiply {
     #[test]
     #[available_gas(20000000)]
     #[fork("Mainnet")]
+    fn test_modify_lever_close_with_fee() {
+        let fee_rate = 100000000000000000_u256;
+        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup(
+            fee_rate.try_into().unwrap()
+        );
+
+        usdc.approve(multiply.contract_address, 10000_000_000.into());
+        singleton.modify_delegation(pool_id, multiply.contract_address, true);
+
+        let increase_lever_params = IncreaseLeverParams {
+            pool_id,
+            collateral_asset: usdc.contract_address,
+            debt_asset: eth.contract_address,
+            user,
+            add_margin: 10000_000_000_u128,
+            margin_swap: array![],
+            margin_swap_limit_amount: 0,
+            lever_swap: array![
+                Swap {
+                    route: array![
+                        RouteNode {
+                            pool_key, sqrt_ratio_limit: MIN_SQRT_RATIO_LIMIT, skip_ahead: 0
+                        }
+                    ],
+                    token_amount: TokenAmount {
+                        token: usdc.contract_address,
+                        amount: i129_new((110_000_000).try_into().unwrap(), true)
+                    },
+                }
+            ],
+            lever_swap_limit_amount: 44000000000000000, // 0.044 ETH
+        };
+
+        let modify_lever_params = ModifyLeverParams {
+            action: ModifyLeverAction::IncreaseLever(increase_lever_params.clone())
+        };
+
+        multiply.modify_lever(modify_lever_params);
+
+        let user_balance_before = usdc.balanceOf(user);
+
+        let decrease_lever_params = DecreaseLeverParams {
+            pool_id,
+            collateral_asset: usdc.contract_address,
+            debt_asset: eth.contract_address,
+            user,
+            sub_margin: 0,
+            recipient: user,
+            lever_swap: array![
+                Swap {
+                    route: array![
+                        RouteNode {
+                            pool_key, sqrt_ratio_limit: MAX_SQRT_RATIO_LIMIT, skip_ahead: 0
+                        }
+                    ],
+                    token_amount: TokenAmount {
+                        token: eth.contract_address, amount: Zero::zero(),
+                    },
+                }
+            ],
+            lever_swap_limit_amount: 121_000_000_u128 + 1121349_u128, // + fee
+            lever_swap_weights: array![SCALE_128],
+            withdraw_swap: array![],
+            withdraw_swap_limit_amount: 0,
+            withdraw_swap_weights: array![],
+            close_position: true
+        };
+
+        let modify_lever_params = ModifyLeverParams {
+            action: ModifyLeverAction::DecreaseLever(decrease_lever_params.clone())
+        };
+
+        let (_, collateral, debt) = singleton
+            .position(pool_id, usdc.contract_address, eth.contract_address, user);
+
+        let modify_lever_response = multiply.modify_lever(modify_lever_params);
+
+        assert!(modify_lever_response.collateral_delta == i257_new(collateral, true));
+        assert!(modify_lever_response.debt_delta == i257_new(debt, true));
+        assert!(modify_lever_response.margin_delta.abs <= 9980_000_000); // deduct slippage + fees from initial margin amount
+
+        let (position, collateral, debt) = singleton
+            .position(pool_id, usdc.contract_address, eth.contract_address, user);
+        assert!(position.collateral_shares == 0);
+        assert!(position.nominal_debt == 0);
+        assert!(collateral == 0);
+        assert!(debt == 0);
+
+        assert!(
+            usdc.balanceOf(user) >= user_balance_before + decrease_lever_params.sub_margin.into()
+        );
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[fork("Mainnet")]
     fn test_modify_lever_multi_swap() {
         let TestConfig { singleton,
         multiply,
@@ -1008,7 +1272,9 @@ mod Test_896150_Multiply {
         usdc,
         user,
         .. } =
-            setup();
+            setup(
+            0
+        );
 
         let usdc_balance_before = usdc.balanceOf(user);
 
@@ -1071,7 +1337,7 @@ mod Test_896150_Multiply {
     #[available_gas(20000000)]
     #[fork("Mainnet")]
     fn test_modify_lever_split_multi_swap() {
-        let TestConfig { singleton, multiply, pool_id, eth, usdc, user, .. } = setup();
+        let TestConfig { singleton, multiply, pool_id, eth, usdc, user, .. } = setup(0);
 
         let usdc_balance_before = usdc.balanceOf(user);
 
@@ -1268,7 +1534,9 @@ mod Test_896150_Multiply {
         usdc,
         user,
         .. } =
-            setup();
+            setup(
+            0
+        );
 
         usdc.approve(multiply.contract_address, 10000_000_000.into());
         singleton.modify_delegation(pool_id, multiply.contract_address, true);
@@ -1315,7 +1583,7 @@ mod Test_896150_Multiply {
     #[available_gas(20000000)]
     #[fork("Mainnet")]
     fn test_modify_lever_close_multi_swap() {
-        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup();
+        let TestConfig { singleton, multiply, pool_id, pool_key, eth, usdc, user, .. } = setup(0);
 
         usdc.approve(multiply.contract_address, 10000_000_000.into());
         singleton.modify_delegation(pool_id, multiply.contract_address, true);
