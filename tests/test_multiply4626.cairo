@@ -406,7 +406,6 @@ mod Test_974640_Multiply4626 {
         let strk_balance_before = strk.balanceOf(user);
 
         strk.approve(xstrk.contract_address, 100 * SCALE);
-        // println!("{}", I4626Dispatcher { contract_address: xstrk.contract_address }.deposit(100 * SCALE, user));
         I4626Dispatcher { contract_address: xstrk.contract_address }.deposit(100 * SCALE, user);
         xstrk.approve(multiply.contract_address, 100 * SCALE);
 
