@@ -1245,7 +1245,9 @@ mod Test_896150_Multiply {
 
         assert!(modify_lever_response.collateral_delta == i257_new(collateral, true));
         assert!(modify_lever_response.debt_delta == i257_new(debt, true));
-        assert!(modify_lever_response.margin_delta.abs <= 9980_000_000); // deduct slippage + fees from initial margin amount
+        assert!(
+            modify_lever_response.margin_delta.abs <= 9980_000_000
+        ); // deduct slippage + fees from initial margin amount
 
         let (position, collateral, debt) = singleton
             .position(pool_id, usdc.contract_address, eth.contract_address, user);

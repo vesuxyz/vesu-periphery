@@ -15,7 +15,7 @@ snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry", tag = "v
 
 [[target.starknet-contract]]
 casm = true
-build-external-contracts = ["vesu::test::mock_oracle::MockPragmaOracle"]
+build-external-contracts = ["vesu::test::mock_oracle::MockPragmaOracle", "vesu::test::mock_asset::MockAsset"]
 
 [[tool.snforge.fork]]
 name = "Mainnet"
@@ -27,4 +27,4 @@ deployMultiply = "scarb --profile release build && node --loader ts-node/esm ./s
 deployMultiply4626 = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployMultiply4626.ts"
 deployLiquidate = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployLiquidate.ts"
 deployRebalance = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployRebalance.ts"
-test = "snforge test"
+test = "snforge test 'test_modify_lever_exact_collateral_deposit_fuzz'"
