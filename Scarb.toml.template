@@ -15,7 +15,7 @@ snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry", tag = "v
 
 [[target.starknet-contract]]
 casm = true
-build-external-contracts = ["vesu::test::mock_oracle::MockPragmaOracle"]
+build-external-contracts = ["vesu::test::mock_oracle::MockPragmaOracle", "vesu::test::mock_asset::MockAsset"]
 
 [[tool.snforge.fork]]
 name = "Mainnet"

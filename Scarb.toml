@@ -19,7 +19,7 @@ build-external-contracts = ["vesu::test::mock_oracle::MockPragmaOracle", "vesu::
 
 [[tool.snforge.fork]]
 name = "Mainnet"
-url = "https://rpc.nethermind.io/mainnet-juno/?apikey=iGnJ0Ws6Tv0OWHm5wj0WBG0Cgdt2FZEVRiJnC8Qm7rgu6x3aFkt2zwfqkaFWV37C"
+url = "https://api.cartridge.gg/x/starknet/mainnet"
 block_id.number = "974640"
 
 [scripts]
@@ -27,4 +27,4 @@ deployMultiply = "scarb --profile release build && node --loader ts-node/esm ./s
 deployMultiply4626 = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployMultiply4626.ts"
 deployLiquidate = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployLiquidate.ts"
 deployRebalance = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployRebalance.ts"
-test = "snforge test 'test_modify_lever_exact_collateral_deposit_fuzz'"
+test = "snforge test"

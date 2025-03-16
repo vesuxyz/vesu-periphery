@@ -18,7 +18,7 @@ pub trait ISingletonMock<TContractState> {
 
 #[starknet::contract]
 pub mod SingletonMock {
-    use starknet::{ContractAddress, get_block_timestamp};
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
 
     use vesu::{
         data_model::{
@@ -28,6 +28,8 @@ pub mod SingletonMock {
         common::{i257, i257_new, deconstruct_collateral_amount, deconstruct_debt_amount, calculate_collateral, calculate_debt},
         units::{SCALE, SCALE_128}
     };
+
+    use ekubo::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
 
     use super::{ISingletonMock};
 
@@ -54,9 +56,9 @@ pub mod SingletonMock {
             ref self: ContractState, modify_position_params: ModifyPositionParams
         ) -> UpdatePositionResponse {
             let asset_config = AssetConfig {
-                total_collateral_shares: SCALE,
-                total_nominal_debt: SCALE,
-                reserve: SCALE,
+                total_collateral_shares: 0,
+                total_nominal_debt: 0,
+                reserve: 0,
                 max_utilization: SCALE,
                 floor: 0,
                 scale: SCALE,
@@ -84,6 +86,8 @@ pub mod SingletonMock {
 
             if collateral_shares_delta > i257_new(0, false) {
                 position.collateral_shares += collateral_shares_delta.abs;
+                IERC20Dispatcher { contract_address: modify_position_params.collateral_asset }
+                    .transferFrom(get_caller_address(), get_contract_address(), collateral_delta.abs);
             } else if collateral_shares_delta < i257_new(0, false) {
                 if collateral_shares_delta.abs > position.collateral_shares {
                     collateral_shares_delta =
@@ -97,6 +101,8 @@ pub mod SingletonMock {
                         );
                 }
                 position.collateral_shares -= collateral_shares_delta.abs;
+                IERC20Dispatcher { contract_address: modify_position_params.collateral_asset }
+                    .transfer(get_caller_address(), collateral_delta.abs);
             }
 
             let (mut debt_delta, mut nominal_debt_delta) = deconstruct_debt_amount(
@@ -105,6 +111,8 @@ pub mod SingletonMock {
 
             if nominal_debt_delta > i257_new(0, false) {
                 position.nominal_debt += nominal_debt_delta.abs;
+                IERC20Dispatcher { contract_address: modify_position_params.debt_asset }
+                    .transfer(get_caller_address(), debt_delta.abs);
             } else if nominal_debt_delta < i257_new(0, false) {
                 if nominal_debt_delta.abs > position.nominal_debt {
                     nominal_debt_delta =
@@ -121,6 +129,8 @@ pub mod SingletonMock {
                         );
                 }
                 position.nominal_debt -= nominal_debt_delta.abs;
+                IERC20Dispatcher { contract_address: modify_position_params.debt_asset }
+                    .transferFrom(get_caller_address(), get_contract_address(), debt_delta.abs);
             }
 
             self
