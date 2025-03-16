@@ -15,11 +15,11 @@ snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry", tag = "v
 
 [[target.starknet-contract]]
 casm = true
-build-external-contracts = ["vesu::test::mock_oracle::MockPragmaOracle"]
+build-external-contracts = ["vesu::test::mock_oracle::MockPragmaOracle", "vesu::test::mock_asset::MockAsset"]
 
 [[tool.snforge.fork]]
 name = "Mainnet"
-url = "https://rpc.nethermind.io/mainnet-juno/?apikey=iGnJ0Ws6Tv0OWHm5wj0WBG0Cgdt2FZEVRiJnC8Qm7rgu6x3aFkt2zwfqkaFWV37C"
+url = "https://api.cartridge.gg/x/starknet/mainnet"
 block_id.number = "974640"
 
 [scripts]

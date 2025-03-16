@@ -13,7 +13,7 @@ pub struct ModifyLeverParams {
     pub action: ModifyLeverAction
 }
 
-#[derive(Serde, Drop, Clone)]
+#[derive(Serde, Drop, Clone, Serialize)]
 pub struct ModifyLeverResponse {
     pub collateral_delta: i257,
     pub debt_delta: i257,
@@ -160,6 +160,10 @@ pub mod Multiply {
 
     #[generate_trait]
     impl InternalFunctions of InternalFunctionsTrait {
+        fn calculate_fee(self: @ContractState, amount: u256) -> u256 {
+            self.fee_rate.read().into() * amount / SCALE
+        }
+
         fn increase_lever(
             ref self: ContractState, increase_lever_params: IncreaseLeverParams
         ) -> ModifyLeverResponse {
@@ -251,10 +255,10 @@ pub mod Multiply {
             );
 
             // charge swap fee on the collateral amount to deposit
-            let fee = self.fee_rate.read() * collateral_amount.amount.mag / SCALE_128;
+            let fee = self.calculate_fee(collateral_amount.amount.mag.into());
             if fee > 0 {
                 assert!(self.fee_owner.read() != Zero::zero(), "zero-fee-recipient");
-                collateral_amount.amount.mag -= fee;
+                collateral_amount.amount.mag -= fee.try_into().unwrap();
                 assert!(
                     IERC20Dispatcher { contract_address: collateral_asset }
                         .transfer(self.fee_owner.read(), fee.into()),
@@ -347,7 +351,7 @@ pub mod Multiply {
 
             // fee is either added to the swap output amount if the position gets closed or simply deducted from the
             // repaid debt amount (less debt is repaid)
-            let mut fee: u128 = 0;
+            let mut fee: u256 = 0;
 
             if close_position {
                 assert_empty_token_amounts(lever_swap.clone());
@@ -355,9 +359,9 @@ pub mod Multiply {
                 let (_, _, mut debt) = singleton
                     .position(pool_id, collateral_asset, debt_asset, user);
                 // apply fee on the total debt since it's equal to the swap output amount
-                fee = (debt.try_into().unwrap() * self.fee_rate.read().into()) / SCALE_128;
+                fee = self.calculate_fee(debt);
                 // increase the required swap output amount by the fee
-                debt = debt + fee.into();
+                debt = debt + fee;
                 // apply weights to lever_swap token amounts
                 lever_swap =
                     apply_weights(
@@ -397,12 +401,12 @@ pub mod Multiply {
 
             if !close_position {
                 // apply fee on the repaid debt amount since it's equal to the swap output amount
-                fee = self.fee_rate.read() * debt_amount.amount.mag / SCALE_128;
+                fee = self.calculate_fee(debt_amount.amount.mag.into());
             }
 
             // deduct fee from repaid debt amount
             // (in case of close_position, debt_amount will be reduced to the position's debt)
-            debt_amount.amount.mag -= fee;
+            debt_amount.amount.mag -= fee.try_into().unwrap();
 
             if fee > 0 {
                 assert!(self.fee_owner.read() != Zero::zero(), "zero-fee-recipient");
