@@ -1,30 +1,23 @@
-
 use starknet::{ContractAddress};
 
-use ekubo::{
-    interfaces::core::{SwapParameters},
-    types::{keys::{PoolKey}, delta::{Delta}}
-};
+use ekubo::{interfaces::core::{SwapParameters}, types::{keys::{PoolKey}, delta::{Delta}}};
 
 #[starknet::interface]
 pub trait IEkuboMock<TContractState> {
-    fn set_rate(
-        ref self: TContractState,
-        pool_key: PoolKey,
-        rate: u256
-    );
+    fn set_rate(ref self: TContractState, pool_key: PoolKey, rate: u256);
 
     fn lock(ref self: TContractState, data: Span<felt252>) -> Span<felt252>;
 
     fn withdraw(
-        ref self: TContractState, token_address: ContractAddress, recipient: ContractAddress, amount: u128
+        ref self: TContractState,
+        token_address: ContractAddress,
+        recipient: ContractAddress,
+        amount: u128
     );
 
     fn pay(ref self: TContractState, token_address: ContractAddress);
 
-    fn swap(
-        ref self: TContractState, pool_key: PoolKey, swap_params: SwapParameters
-    ) -> Delta;
+    fn swap(ref self: TContractState, pool_key: PoolKey, swap_params: SwapParameters) -> Delta;
 }
 
 #[starknet::contract]
@@ -34,7 +27,10 @@ pub mod EkuboMock {
     use core::serde::Serde;
 
     use ekubo::{
-        interfaces::{core::{SwapParameters, ILockerDispatcher, ILockerDispatcherTrait}, erc20::{IERC20Dispatcher, IERC20DispatcherTrait}},
+        interfaces::{
+            core::{SwapParameters, ILockerDispatcher, ILockerDispatcherTrait},
+            erc20::{IERC20Dispatcher, IERC20DispatcherTrait}
+        },
         types::{i129::{i129, i129Trait, i129_new}, keys::{PoolKey}, delta::{Delta}},
         components::util::{serialize}
     };
@@ -53,11 +49,7 @@ pub mod EkuboMock {
 
     #[abi(embed_v0)]
     impl EkuboMockImpl of IEkuboMock<ContractState> {
-        fn set_rate(
-            ref self: ContractState,
-            pool_key: PoolKey,
-            rate: u256
-        ) {
+        fn set_rate(ref self: ContractState, pool_key: PoolKey, rate: u256) {
             self.rate.write((pool_key.token0, pool_key.token1), rate);
         }
 
@@ -67,7 +59,10 @@ pub mod EkuboMock {
         }
 
         fn withdraw(
-            ref self: ContractState, token_address: ContractAddress, recipient: ContractAddress, amount: u128
+            ref self: ContractState,
+            token_address: ContractAddress,
+            recipient: ContractAddress,
+            amount: u128
         ) {
             let token = IERC20Dispatcher { contract_address: token_address };
             token.transfer(recipient, amount.into());
@@ -79,9 +74,7 @@ pub mod EkuboMock {
             token.transferFrom(get_caller_address(), get_contract_address(), approval);
         }
 
-        fn swap(
-            ref self: ContractState, pool_key: PoolKey, swap_params: SwapParameters
-        ) -> Delta {
+        fn swap(ref self: ContractState, pool_key: PoolKey, swap_params: SwapParameters) -> Delta {
             let rate = self.rate.read((pool_key.token0, pool_key.token1));
 
             let mut amount0: i129 = i129_new(0, false);
