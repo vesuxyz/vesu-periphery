@@ -48,6 +48,8 @@ pub trait IMultiply4626<TContractState> {
 pub mod Multiply4626 {
     use starknet::{ContractAddress, get_contract_address, get_caller_address};
 
+    use core::num::traits::{Zero};
+
     use ekubo::{
         components::{shared_locker::{consume_callback_data, handle_delta, call_core_with_callback}},
         interfaces::{
@@ -78,7 +80,9 @@ pub mod Multiply4626 {
     #[storage]
     struct Storage {
         core: ICoreDispatcher,
-        singleton: ISingletonDispatcher
+        singleton: ISingletonDispatcher,
+        fee_owner: ContractAddress,
+        fee_rate: u128
     }
 
     #[derive(Drop, starknet::Event)]
@@ -104,14 +108,24 @@ pub mod Multiply4626 {
 
     #[constructor]
     fn constructor(
-        ref self: ContractState, core: ICoreDispatcher, singleton: ISingletonDispatcher
+        ref self: ContractState,
+        core: ICoreDispatcher,
+        singleton: ISingletonDispatcher,
+        fee_owner: ContractAddress,
+        fee_rate: u128
     ) {
         self.core.write(core);
         self.singleton.write(singleton);
+        self.fee_owner.write(fee_owner);
+        self.fee_rate.write(fee_rate);
     }
 
     #[generate_trait]
     impl InternalFunctions of InternalFunctionsTrait {
+        fn calculate_fee(self: @ContractState, amount: u256) -> u256 {
+            self.fee_rate.read().into() * amount / SCALE
+        }
+
         fn increase_lever(
             ref self: ContractState, increase_lever_params: IncreaseLeverParams
         ) -> ModifyLeverResponse {
@@ -185,6 +199,17 @@ pub mod Multiply4626 {
             // flashloan lever_amount
             handle_delta(core, debt_asset, i129_new(lever_amount, true), get_contract_address());
 
+            // charge swap fee on the underlier amount to wrap and deposit
+            let fee = self.calculate_fee(lever_amount.into());
+            if fee > 0 {
+                assert!(self.fee_owner.read() != Zero::zero(), "zero-fee-recipient");
+                assert!(
+                    IERC20Dispatcher { contract_address: debt_asset }
+                        .transfer(self.fee_owner.read(), fee.into()),
+                    "transfer-failed"
+                );
+            }
+
             IERC20Dispatcher { contract_address: debt_asset }
                 .approve(
                     collateral_asset,
@@ -194,16 +219,19 @@ pub mod Multiply4626 {
                         lever_amount + margin_amount
                     })
                         .into()
+                        - fee
                 );
 
             // exclude margin_amount if margin token is already the wrapped token
             let mut wrapped_amount = I4626Dispatcher { contract_address: collateral_asset }
                 .deposit(
-                    if add_margin_is_wrapped {
-                        lever_amount.into()
+                    (if add_margin_is_wrapped {
+                        lever_amount
                     } else {
-                        (margin_amount + lever_amount).into()
-                    },
+                        margin_amount + lever_amount
+                    })
+                        .into()
+                        - fee,
                     get_contract_address()
                 );
 
