@@ -19,12 +19,15 @@ build-external-contracts = ["vesu::test::mock_oracle::MockPragmaOracle"]
 
 [[tool.snforge.fork]]
 name = "Mainnet"
-url = "https://rpc.nethermind.io/mainnet-juno/?apikey=iGnJ0Ws6Tv0OWHm5wj0WBG0Cgdt2FZEVRiJnC8Qm7rgu6x3aFkt2zwfqkaFWV37C"
-block_id.number = "974640"
+url = "https://api.cartridge.gg/x/starknet/mainnet"
+block_id.number = "896150"
 
 [scripts]
 deployMultiply = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployMultiply.ts"
 deployMultiply4626 = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployMultiply4626.ts"
 deployLiquidate = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployLiquidate.ts"
 deployRebalance = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployRebalance.ts"
+deployProxy = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployProxy.ts"
+callProxy = "scarb --profile release build && node --loader ts-node/esm ./scripts/callProxy.ts"
+checkShutdownStatus = "scarb --profile release build && node --loader ts-node/esm ./scripts/checkShutdownStatus.ts"
 test = "snforge test"

@@ -6,7 +6,7 @@ const deployer = await setup(process.env.NETWORK);
 const [rebalance, calls] = await deployer.deferContract(
   "Rebalance",
   CallData.compile({
-    core: deployer.config.protocol.ekubo!, singleton: deployer.config.protocol.singleton!, owner: deployer.address, fee_rate: 0
+    core: deployer.config.protocol.ekubo.core!, singleton: deployer.config.protocol.singleton!, owner: deployer.address, fee_rate: 0
   }),
 );
 

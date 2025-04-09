@@ -10,9 +10,15 @@ export const YEAR_IN_SECONDS = 360 * 24 * 60 * 60;
 
 interface ProtocolConfig {
   singleton: string | undefined;
-  extension: string | undefined;
-  oracle: string | undefined;
-  ekubo: string | undefined;
+  extensionPO: string | undefined;
+  extensionCL: string | undefined;
+  pragma: {
+    oracle: string | undefined;
+    summary_stats: string | undefined;
+  };
+  ekubo: {
+    core: string | undefined;
+  };
 }
 
 export class EnvAssetParams {
@@ -75,7 +81,7 @@ function stringifyAddresses(value: any): any {
   if (isArray(value)) {
     return value.map(stringifyAddresses);
   }
-  return value?.address ? value.address : value;
+  return value?.address ? value.address : value.oracle.address;
 }
 
 export function mapAssetPairs<T>(
