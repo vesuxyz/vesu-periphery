@@ -1,9 +1,6 @@
 use starknet::{account::Call, ContractAddress};
 use vesu_periphery::swap::Swap;
-use vesu::{
-    common::{i257, i257_new},
-    data_model::{Amount}
-};
+use vesu::{common::{i257, i257_new}, data_model::{Amount}};
 
 #[starknet::interface]
 trait IERC4626<TContractState> {
@@ -19,10 +16,14 @@ trait IERC4626<TContractState> {
     fn mint(ref self: TContractState, shares: u256, receiver: ContractAddress) -> u256;
     fn max_withdraw(self: @TContractState, owner: ContractAddress) -> u256;
     fn preview_withdraw(self: @TContractState, assets: u256) -> u256;
-    fn withdraw(ref self: TContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress) -> u256;
+    fn withdraw(
+        ref self: TContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress
+    ) -> u256;
     fn max_redeem(self: @TContractState, owner: ContractAddress) -> u256;
     fn preview_redeem(self: @TContractState, shares: u256) -> u256;
-    fn redeem(ref self: TContractState, shares: u256, receiver: ContractAddress, owner: ContractAddress) -> u256;
+    fn redeem(
+        ref self: TContractState, shares: u256, receiver: ContractAddress, owner: ContractAddress
+    ) -> u256;
 }
 
 #[derive(Drop, Copy, Serde)]
@@ -34,11 +35,18 @@ pub struct Claim {
 
 #[starknet::interface]
 pub trait IVault<TContractState> {
-    fn claim_strk_rewards(ref self: TContractState, rewardsContract: ContractAddress, claim: Claim, proof: Span<felt252>);
+    fn claim_strk_rewards(
+        ref self: TContractState,
+        rewardsContract: ContractAddress,
+        claim: Claim,
+        proof: Span<felt252>
+    );
     fn swap(ref self: TContractState, swap: Array<Swap>, limit_amount: u128);
     fn compound(ref self: TContractState, compound_asset: ContractAddress) -> u256;
     fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
-    fn withdraw(ref self: TContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress) -> u256;
+    fn withdraw(
+        ref self: TContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress
+    ) -> u256;
 }
 
 #[starknet::interface]
@@ -81,15 +89,20 @@ pub trait IStrategy<TContractState> {
 
 #[starknet::contract]
 pub mod Vault {
-    use starknet::{account::Call, syscalls::call_contract_syscall, ContractAddress, get_caller_address, get_contract_address};
+    use starknet::{
+        account::Call, syscalls::call_contract_syscall, ContractAddress, get_caller_address,
+        get_contract_address
+    };
     use ekubo::{
         components::{shared_locker::{consume_callback_data, handle_delta, call_core_with_callback}},
         interfaces::core::{ICoreDispatcher, ICoreDispatcherTrait, ILocker, SwapParameters}
     };
     use vesu::{
-        data_model::{ModifyPositionParams, Amount, AmountType, AmountDenomination, AssetConfig, UpdatePositionResponse},
-        units::SCALE,
-        singleton::{Singleton, ISingletonDispatcher, ISingletonDispatcherTrait},
+        data_model::{
+            ModifyPositionParams, Amount, AmountType, AmountDenomination, AssetConfig,
+            UpdatePositionResponse
+        },
+        units::SCALE, singleton::{Singleton, ISingletonDispatcher, ISingletonDispatcherTrait},
         v_token::{IVToken, IVTokenDispatcher, IVTokenDispatcherTrait},
         vendor::{
             erc20::{ERC20ABIDispatcher as IERC20Dispatcher, ERC20ABIDispatcherTrait},
@@ -101,7 +114,8 @@ pub mod Vault {
         swap::{swap, Swap},
         vault::{
             IVault, Claim, IDefiSpringDistributorDispatcher, IDefiSpringDistributorDispatcherTrait,
-            VaultParams, VaultAction, SwapParams, IStrategyDispatcher, IStrategyDispatcherTrait, StrategyResponse
+            VaultParams, VaultAction, SwapParams, IStrategyDispatcher, IStrategyDispatcherTrait,
+            StrategyResponse
         }
     };
 
@@ -160,18 +174,14 @@ pub mod Vault {
     }
 
     fn convert_to_collateral_shares(
-        total_supply: u256,
-        total_collateral_shares: u256,
-        vault_shares_delta: u256
+        total_supply: u256, total_collateral_shares: u256, vault_shares_delta: u256
     ) -> u256 {
         let index = total_collateral_shares * SCALE / total_supply;
         vault_shares_delta * index / SCALE
     }
 
     fn convert_to_vault_shares(
-        total_supply: u256,
-        total_collateral_shares: u256,
-        collateral_shares_delta: u256
+        total_supply: u256, total_collateral_shares: u256, collateral_shares_delta: u256
     ) -> u256 {
         let index = total_collateral_shares * SCALE / total_supply;
         collateral_shares_delta * SCALE / index
@@ -179,7 +189,9 @@ pub mod Vault {
 
     #[generate_trait]
     impl InternalFunctions of InternalFunctionsTrait {
-        fn transfer_asset(self: @ContractState, sender: ContractAddress, to: ContractAddress, amount: u256) {
+        fn transfer_asset(
+            self: @ContractState, sender: ContractAddress, to: ContractAddress, amount: u256
+        ) {
             let asset = self.asset.read();
             let is_legacy = self.is_legacy.read();
             let erc20 = IERC20Dispatcher { contract_address: asset };
@@ -192,10 +204,7 @@ pub mod Vault {
             }
         }
 
-        fn _swap(
-            ref self: ContractState,
-            params: SwapParams
-        ) {
+        fn _swap(ref self: ContractState, params: SwapParams) {
             let SwapParams { swap, limit_amount } = params;
             let core = self.core.read();
             let (input_amount, output_amount) = swap(core, swap, limit_amount);
@@ -230,15 +239,13 @@ pub mod Vault {
             proof: Span<felt252>,
         ) {
             assert!(get_caller_address() == self.manager.read(), "caller-not-manager");
-            let defi_spring_distributor = IDefiSpringDistributorDispatcher { contract_address: rewardsContract };
+            let defi_spring_distributor = IDefiSpringDistributorDispatcher {
+                contract_address: rewardsContract
+            };
             defi_spring_distributor.claim(claim.amount, proof);
         }
 
-        fn swap(
-            ref self: ContractState,
-            swap: Array<Swap>,
-            limit_amount: u128
-        ) {
+        fn swap(ref self: ContractState, swap: Array<Swap>, limit_amount: u128) {
             assert!(get_caller_address() == self.manager.read(), "caller-not-manager");
             call_core_with_callback(self.core.read(), @SwapParams { swap, limit_amount })
         }
@@ -250,29 +257,39 @@ pub mod Vault {
             let strategy = self.strategy.read();
 
             // call the strategy's on_compound hook
-            let StrategyResponse { pool_id, collateral_asset, debt_asset, collateral_amount, debt_amount } = strategy.on_compound(compound_asset);
+            let StrategyResponse { pool_id,
+            collateral_asset,
+            debt_asset,
+            collateral_amount,
+            debt_amount } =
+                strategy
+                .on_compound(compound_asset);
 
             // approve the assets to the singleton
-            IERC20Dispatcher { contract_address: collateral_asset }.approve(singleton.contract_address, collateral_amount);
+            IERC20Dispatcher { contract_address: collateral_asset }
+                .approve(singleton.contract_address, collateral_amount);
 
             // deposit the assets into singleton
-            singleton.modify_position(ModifyPositionParams {
-                pool_id,
-                collateral_asset,
-                debt_asset,
-                user: get_contract_address(),
-                collateral: Amount {
-                    amount_type: AmountType::Delta,
-                    denomination: AmountDenomination::Assets,
-                    value: i257_new(collateral_amount, false)
-                },
-                debt: Amount {
-                    amount_type: AmountType::Delta,
-                    denomination: AmountDenomination::Assets,
-                    value: i257_new(debt_amount, false)
-                },
-                data: array![].span()
-            });
+            singleton
+                .modify_position(
+                    ModifyPositionParams {
+                        pool_id,
+                        collateral_asset,
+                        debt_asset,
+                        user: get_contract_address(),
+                        collateral: Amount {
+                            amount_type: AmountType::Delta,
+                            denomination: AmountDenomination::Assets,
+                            value: i257_new(collateral_amount, false)
+                        },
+                        debt: Amount {
+                            amount_type: AmountType::Delta,
+                            denomination: AmountDenomination::Assets,
+                            value: i257_new(debt_amount, false)
+                        },
+                        data: array![].span()
+                    }
+                );
 
             collateral_amount
         }
@@ -280,37 +297,47 @@ pub mod Vault {
         fn deposit(ref self: ContractState, assets: u256, receiver: ContractAddress) -> u256 {
             let singleton = self.singleton.read();
             let strategy = self.strategy.read();
-            
+
             // transfer assets from sender to vault
             let asset = IERC20Dispatcher { contract_address: self.asset.read() };
             asset.transfer_from(get_caller_address(), get_contract_address(), assets);
             asset.approve(strategy.contract_address, assets);
 
             // call the strategy's on_deposit hook
-            let StrategyResponse { pool_id, collateral_asset, debt_asset, collateral_amount, debt_amount } = strategy.on_deposit(assets);
+            let StrategyResponse { pool_id,
+            collateral_asset,
+            debt_asset,
+            collateral_amount,
+            debt_amount } =
+                strategy
+                .on_deposit(assets);
 
             // set allowance for singleton to transfer assets
-            IERC20Dispatcher { contract_address: collateral_asset }.approve(singleton.contract_address, assets);
+            IERC20Dispatcher { contract_address: collateral_asset }
+                .approve(singleton.contract_address, assets);
 
             // deposit assets into singleton
-            let UpdatePositionResponse { collateral_shares_delta, .. } = singleton.modify_position(ModifyPositionParams {
-                pool_id,
-                collateral_asset,
-                debt_asset,
-                user: get_contract_address(),
-                collateral: Amount {
-                    amount_type: AmountType::Delta,
-                    denomination: AmountDenomination::Assets,
-                    value: i257_new(collateral_amount, false)
-                },
-                debt: Amount {
-                    amount_type: AmountType::Delta,
-                    denomination: AmountDenomination::Assets,
-                    value: i257_new(debt_amount, false)
-                },
-                data: array![].span()
-            });
-            
+            let UpdatePositionResponse { collateral_shares_delta, .. } = singleton
+                .modify_position(
+                    ModifyPositionParams {
+                        pool_id,
+                        collateral_asset,
+                        debt_asset,
+                        user: get_contract_address(),
+                        collateral: Amount {
+                            amount_type: AmountType::Delta,
+                            denomination: AmountDenomination::Assets,
+                            value: i257_new(collateral_amount, false)
+                        },
+                        debt: Amount {
+                            amount_type: AmountType::Delta,
+                            denomination: AmountDenomination::Assets,
+                            value: i257_new(debt_amount, false)
+                        },
+                        data: array![].span()
+                    }
+                );
+
             // mint vault shares to receiver
             let (asset_config, _) = singleton.asset_config(pool_id, collateral_asset);
             let vault_shares = convert_to_vault_shares(
@@ -323,31 +350,42 @@ pub mod Vault {
             vault_shares
         }
 
-        fn withdraw(ref self: ContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress) -> u256 {
+        fn withdraw(
+            ref self: ContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress
+        ) -> u256 {
             let singleton = self.singleton.read();
             let strategy = self.strategy.read();
 
             // call the strategy's on_before_withdraw hook
-            let StrategyResponse { pool_id, collateral_asset, debt_asset, collateral_amount, debt_amount } = strategy.on_before_withdraw(assets);
+            let StrategyResponse { pool_id,
+            collateral_asset,
+            debt_asset,
+            collateral_amount,
+            debt_amount } =
+                strategy
+                .on_before_withdraw(assets);
 
             // withdraw assets from singleton
-            let UpdatePositionResponse { collateral_shares_delta, .. } = singleton.modify_position(ModifyPositionParams {
-                pool_id,
-                collateral_asset,
-                debt_asset,
-                user: owner,
-                collateral: Amount {
-                    amount_type: AmountType::Delta,
-                    denomination: AmountDenomination::Assets,
-                    value: i257_new(collateral_amount, true)
-                },
-                debt: Amount {
-                    amount_type: AmountType::Delta,
-                    denomination: AmountDenomination::Assets,
-                    value: i257_new(debt_amount, true)
-                },
-                data: array![].span()
-            });
+            let UpdatePositionResponse { collateral_shares_delta, .. } = singleton
+                .modify_position(
+                    ModifyPositionParams {
+                        pool_id,
+                        collateral_asset,
+                        debt_asset,
+                        user: owner,
+                        collateral: Amount {
+                            amount_type: AmountType::Delta,
+                            denomination: AmountDenomination::Assets,
+                            value: i257_new(collateral_amount, true)
+                        },
+                        debt: Amount {
+                            amount_type: AmountType::Delta,
+                            denomination: AmountDenomination::Assets,
+                            value: i257_new(debt_amount, true)
+                        },
+                        data: array![].span()
+                    }
+                );
 
             // call the strategy's on_after_withdraw hook
             strategy.on_after_withdraw(collateral_amount, assets);
@@ -366,17 +404,16 @@ pub mod Vault {
 
             vault_shares
         }
+    // deposit (underlier)
+    // (underlier -> collateral_shares) -> vault_shares
 
-        // deposit (underlier)
-        // (underlier -> collateral_shares) -> vault_shares
+    // mint (vault_shares)
+    // vault_shares -> (collateral_shares -> underlier)
 
-        // mint (vault_shares)
-        // vault_shares -> (collateral_shares -> underlier)
+    // withdraw( underlier)
+    // (underlier -> collateral_shares) -> vault_shares
 
-        // withdraw( underlier)
-        // (underlier -> collateral_shares) -> vault_shares
-
-        // redeem(vault_shares)
-        // vault_shares -> (collateral_shares -> underlier)
+    // redeem(vault_shares)
+    // vault_shares -> (collateral_shares -> underlier)
     }
 }
