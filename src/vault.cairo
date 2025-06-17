@@ -44,9 +44,14 @@ pub trait IVault<TContractState> {
     fn swap(ref self: TContractState, swap: Array<Swap>, limit_amount: u128);
     fn compound(ref self: TContractState, compound_asset: ContractAddress) -> u256;
     fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
+    fn mint(ref self: TContractState, shares: u256, receiver: ContractAddress) -> u256;
     fn withdraw(
         ref self: TContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress
     ) -> u256;
+    fn redeem(
+        ref self: TContractState, shares: u256, receiver: ContractAddress, owner: ContractAddress
+    ) -> u256;
+    fn approve_singleton(ref self: TContractState);
 }
 
 #[starknet::interface]
@@ -75,20 +80,21 @@ pub struct StrategyResponse {
     pub pool_id: felt252,
     pub collateral_asset: ContractAddress,
     pub debt_asset: ContractAddress,
-    pub collateral_amount: u256,
-    pub debt_amount: u256
 }
 
 #[starknet::interface]
 pub trait IStrategy<TContractState> {
-    fn on_compound(ref self: TContractState, compound_asset: ContractAddress) -> StrategyResponse;
-    fn on_deposit(ref self: TContractState, amount: u256) -> StrategyResponse;
-    fn on_before_withdraw(ref self: TContractState, amount: u256) -> StrategyResponse;
-    fn on_after_withdraw(ref self: TContractState, withdrawn_amount: u256, requested_amount: u256);
+    fn on_compound(
+        ref self: TContractState, compound_asset: ContractAddress
+    ) -> (StrategyResponse, u256);
+    fn on_deposit(ref self: TContractState) -> StrategyResponse;
+    fn on_withdraw(ref self: TContractState) -> StrategyResponse;
 }
 
 #[starknet::contract]
 pub mod Vault {
+    use core::integer::BoundedInt;
+
     use starknet::{
         account::Call, syscalls::call_contract_syscall, ContractAddress, get_caller_address,
         get_contract_address
@@ -167,6 +173,8 @@ pub mod Vault {
         self.erc20.initializer(name, symbol, decimals);
         self.asset.write(asset);
         let singleton = ISingletonDispatcher { contract_address: singleton };
+        IERC20Dispatcher { contract_address: asset }
+            .approve(singleton.contract_address, BoundedInt::max());
         let (asset_config, _) = singleton.asset_config(0, asset);
         self.is_legacy.write(asset_config.is_legacy);
         self.singleton.write(singleton);
@@ -257,17 +265,8 @@ pub mod Vault {
             let strategy = self.strategy.read();
 
             // call the strategy's on_compound hook
-            let StrategyResponse { pool_id,
-            collateral_asset,
-            debt_asset,
-            collateral_amount,
-            debt_amount } =
-                strategy
+            let (StrategyResponse { pool_id, collateral_asset, debt_asset }, amount) = strategy
                 .on_compound(compound_asset);
-
-            // approve the assets to the singleton
-            IERC20Dispatcher { contract_address: collateral_asset }
-                .approve(singleton.contract_address, collateral_amount);
 
             // deposit the assets into singleton
             singleton
@@ -280,20 +279,18 @@ pub mod Vault {
                         collateral: Amount {
                             amount_type: AmountType::Delta,
                             denomination: AmountDenomination::Assets,
-                            value: i257_new(collateral_amount, false)
+                            value: i257_new(amount, false)
                         },
-                        debt: Amount {
-                            amount_type: AmountType::Delta,
-                            denomination: AmountDenomination::Assets,
-                            value: i257_new(debt_amount, false)
-                        },
+                        debt: Default::default(),
                         data: array![].span()
                     }
                 );
 
-            collateral_amount
+            amount
         }
 
+        // deposit (underlier)
+        // (underlier -> collateral_shares) -> vault_shares
         fn deposit(ref self: ContractState, assets: u256, receiver: ContractAddress) -> u256 {
             let singleton = self.singleton.read();
             let strategy = self.strategy.read();
@@ -304,17 +301,7 @@ pub mod Vault {
             asset.approve(strategy.contract_address, assets);
 
             // call the strategy's on_deposit hook
-            let StrategyResponse { pool_id,
-            collateral_asset,
-            debt_asset,
-            collateral_amount,
-            debt_amount } =
-                strategy
-                .on_deposit(assets);
-
-            // set allowance for singleton to transfer assets
-            IERC20Dispatcher { contract_address: collateral_asset }
-                .approve(singleton.contract_address, assets);
+            let StrategyResponse { pool_id, collateral_asset, debt_asset } = strategy.on_deposit();
 
             // deposit assets into singleton
             let UpdatePositionResponse { collateral_shares_delta, .. } = singleton
@@ -327,13 +314,9 @@ pub mod Vault {
                         collateral: Amount {
                             amount_type: AmountType::Delta,
                             denomination: AmountDenomination::Assets,
-                            value: i257_new(collateral_amount, false)
+                            value: i257_new(assets, false)
                         },
-                        debt: Amount {
-                            amount_type: AmountType::Delta,
-                            denomination: AmountDenomination::Assets,
-                            value: i257_new(debt_amount, false)
-                        },
+                        debt: Default::default(),
                         data: array![].span()
                     }
                 );
@@ -350,6 +333,44 @@ pub mod Vault {
             vault_shares
         }
 
+        // mint (vault_shares)
+        // vault_shares -> (collateral_shares -> underlier)
+        fn mint(ref self: ContractState, shares: u256, receiver: ContractAddress) -> u256 {
+            let singleton = self.singleton.read();
+            let strategy = self.strategy.read();
+
+            let StrategyResponse { pool_id, collateral_asset, debt_asset } = strategy.on_deposit();
+
+            let (asset_config, _) = singleton.asset_config(pool_id, collateral_asset);
+            let collateral_shares = convert_to_collateral_shares(
+                self.erc20.total_supply(), asset_config.total_collateral_shares, shares
+            );
+
+            let UpdatePositionResponse { collateral_delta, .. } = singleton
+                .modify_position(
+                    ModifyPositionParams {
+                        pool_id,
+                        collateral_asset,
+                        debt_asset,
+                        user: get_contract_address(),
+                        collateral: Amount {
+                            amount_type: AmountType::Delta,
+                            denomination: AmountDenomination::Native,
+                            value: i257_new(collateral_shares, false)
+                        },
+                        debt: Default::default(),
+                        data: array![].span()
+                    }
+                );
+
+            // mint vault shares to receiver
+            self.erc20._mint(receiver, shares);
+
+            collateral_delta.abs
+        }
+
+        // withdraw( underlier)
+        // (underlier -> collateral_shares) -> vault_shares
         fn withdraw(
             ref self: ContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress
         ) -> u256 {
@@ -357,13 +378,7 @@ pub mod Vault {
             let strategy = self.strategy.read();
 
             // call the strategy's on_before_withdraw hook
-            let StrategyResponse { pool_id,
-            collateral_asset,
-            debt_asset,
-            collateral_amount,
-            debt_amount } =
-                strategy
-                .on_before_withdraw(assets);
+            let StrategyResponse { pool_id, collateral_asset, debt_asset } = strategy.on_withdraw();
 
             // withdraw assets from singleton
             let UpdatePositionResponse { collateral_shares_delta, .. } = singleton
@@ -376,19 +391,12 @@ pub mod Vault {
                         collateral: Amount {
                             amount_type: AmountType::Delta,
                             denomination: AmountDenomination::Assets,
-                            value: i257_new(collateral_amount, true)
+                            value: i257_new(assets, true)
                         },
-                        debt: Amount {
-                            amount_type: AmountType::Delta,
-                            denomination: AmountDenomination::Assets,
-                            value: i257_new(debt_amount, true)
-                        },
+                        debt: Default::default(),
                         data: array![].span()
                     }
                 );
-
-            // call the strategy's on_after_withdraw hook
-            strategy.on_after_withdraw(collateral_amount, assets);
 
             // burn vault shares from owner
             let (asset_config, _) = singleton.asset_config(pool_id, collateral_asset);
@@ -404,16 +412,55 @@ pub mod Vault {
 
             vault_shares
         }
-    // deposit (underlier)
-    // (underlier -> collateral_shares) -> vault_shares
 
-    // mint (vault_shares)
-    // vault_shares -> (collateral_shares -> underlier)
+        // redeem(vault_shares)
+        // vault_shares -> (collateral_shares -> underlier)
+        fn redeem(
+            ref self: ContractState, shares: u256, receiver: ContractAddress, owner: ContractAddress
+        ) -> u256 {
+            let singleton = self.singleton.read();
+            let strategy = self.strategy.read();
 
-    // withdraw( underlier)
-    // (underlier -> collateral_shares) -> vault_shares
+            // call the strategy's on_before_withdraw hook
+            let StrategyResponse { pool_id, collateral_asset, debt_asset } = strategy.on_withdraw();
 
-    // redeem(vault_shares)
-    // vault_shares -> (collateral_shares -> underlier)
+            let (asset_config, _) = singleton.asset_config(pool_id, collateral_asset);
+            let collateral_shares = convert_to_collateral_shares(
+                self.erc20.total_supply(), asset_config.total_collateral_shares, shares
+            );
+
+            // withdraw assets from singleton
+            let UpdatePositionResponse { collateral_delta, .. } = singleton
+                .modify_position(
+                    ModifyPositionParams {
+                        pool_id,
+                        collateral_asset,
+                        debt_asset,
+                        user: owner,
+                        collateral: Amount {
+                            amount_type: AmountType::Delta,
+                            denomination: AmountDenomination::Native,
+                            value: i257_new(collateral_shares, true)
+                        },
+                        debt: Default::default(),
+                        data: array![].span()
+                    }
+                );
+
+            // burn vault shares from owner
+            self.erc20._burn(owner, shares);
+
+            // transfer assets from vault to receiver
+            IERC20Dispatcher { contract_address: self.asset.read() }
+                .transfer(receiver, collateral_delta.abs);
+
+            collateral_delta.abs
+        }
+
+        /// Re-approves the vToken to be spendable by the extension
+        fn approve_singleton(ref self: ContractState) {
+            IERC20Dispatcher { contract_address: self.asset.read() }
+                .approve(self.singleton.read().contract_address, BoundedInt::max());
+        }
     }
 }
