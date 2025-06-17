@@ -4,3 +4,4 @@ pub mod multiply4626;
 pub mod liquidate;
 pub mod rebalance;
 pub mod proxy;
+pub mod vault;

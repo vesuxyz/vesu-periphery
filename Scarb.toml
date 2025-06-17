@@ -8,7 +8,7 @@ edition = "2023_11"
 [dependencies]
 starknet = "2.6.3"
 ekubo = { git = "https://github.com/EkuboProtocol/abis", commit = "946e1f3f97d48918d7cbd484de56bb2de8dd755e" }
-vesu = { git = "https://github.com/vesuxyz/vesu-v1", commit = "78cf26dd88c309a9d267e5968030e927a60cffcb" }
+vesu = { git = "https://github.com/vesuxyz/vesu-v1", commit = "d790f0ca090fe9e5025360d6e11f768d70938f76" }
 
 [dev-dependencies]
 snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry", tag = "v0.21.0" }

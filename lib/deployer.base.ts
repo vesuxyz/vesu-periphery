@@ -55,8 +55,8 @@ export class BaseDeployer extends Account {
 
 function readArtifacts(contract: string): DeclareContractPayload {
   return {
-    contract: readArtifact(`./target/release/vesu_periphery_${contract}.contract_class.json`),
-    casm: readArtifact(`./target/release/vesu_periphery_${contract}.compiled_contract_class.json`),
+    contract: readArtifact(`./target/release/vesu_${contract}.contract_class.json`),
+    casm: readArtifact(`./target/release/vesu_${contract}.compiled_contract_class.json`),
   };
 }
 
