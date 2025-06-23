@@ -61,14 +61,13 @@ pub trait IVault<TContractState> {
         ref self: TContractState, modify_lever_params: ModifyLeverParams
     ) -> ModifyLeverResponse;
     fn nav(self: @TContractState) -> u256;
+
     fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
     fn mint(ref self: TContractState, shares: u256, receiver: ContractAddress) -> u256;
-    fn withdraw(
-        ref self: TContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress
-    ) -> u256;
-    fn redeem(
-        ref self: TContractState, shares: u256, receiver: ContractAddress, owner: ContractAddress
-    ) -> u256;
+
+    fn redeem(ref self: TContractState, receiver: ContractAddress, owner: ContractAddress) -> u256;
+    fn request_redeem(ref self: TContractState, shares: u256);
+
     fn approve_singleton(ref self: TContractState);
 }
 
@@ -163,6 +162,7 @@ pub mod Vault {
         // // The settlement status of a user after triggering withdrawal or redemption
         // settlement_status: LegacyMap::<ContractAddress, (u256, u256, u64)>,
 
+        redemption_requests: LegacyMap::<ContractAddress, (u64, u256, u256)>,
         // storage for the timestamp manager component
         #[substorage(v0)]
         position_list: position_list_component::Storage,
@@ -385,21 +385,19 @@ pub mod Vault {
             assets
         }
 
-        fn withdraw(
-            ref self: ContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress
-        ) -> u256 {
-            let vault_shares = convert_to_shares(self.erc20.total_supply(), self.nav(), assets);
-            self.erc20._burn(owner, vault_shares);
-
-            IERC20Dispatcher { contract_address: self.asset.read() }.transfer(receiver, assets);
-
-            vault_shares
-        }
-
         fn redeem(
-            ref self: ContractState, shares: u256, receiver: ContractAddress, owner: ContractAddress
+            ref self: ContractState, receiver: ContractAddress, owner: ContractAddress
         ) -> u256 {
-            let assets = convert_to_assets(self.erc20.total_supply(), self.nav(), shares);
+            let (timestamp, shares, nav_at_request) = self.redemption_requests.read(owner);
+
+            assert!(timestamp + 86400 > get_block_timestamp(), "redeem-timeout");
+
+            let mut nav = self.nav();
+            if nav > nav_at_request {
+                nav = nav_at_request
+            }
+
+            let assets = convert_to_assets(self.erc20.total_supply(), nav, shares);
 
             self.erc20._burn(owner, shares);
 
@@ -408,19 +406,11 @@ pub mod Vault {
             assets
         }
 
-        // min(assets_at_start, assets_at_settlement)
-
-        // fn start_withdraw(ref self: ContractState, assets: u256) {
-        //     let strategy = self.strategy.read();
-        //     let (pool_id, collateral_asset, _) = strategy.pool_info();
-        //     let (asset_config, _) = self.singleton.read().asset_config(pool_id, collateral_asset);
-        //     let collateral_shares = convert_to_collateral_shares(
-        //         self.erc20.total_supply(), asset_config.total_collateral_shares, assets);
-
-        //     self.settlement_status.write(get_contract_address(), (collateral_shares, assets, get_block_timestamp()));
-        // }
-
-        // fn start_redeem(ref self: ContractState, shares: u256) {}
+        fn request_redeem(ref self: ContractState, shares: u256) {
+            self
+                .redemption_requests
+                .write(get_caller_address(), (get_block_timestamp(), shares, self.nav()));
+        }
 
         /// Re-approves the vToken to be spendable by the extension
         fn approve_singleton(ref self: ContractState) {
