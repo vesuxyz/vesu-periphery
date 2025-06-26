@@ -30,4 +30,4 @@ deployRebalance = "scarb --profile release build && node --loader ts-node/esm ./
 deployProxy = "scarb --profile release build && node --loader ts-node/esm ./scripts/deployProxy.ts"
 callProxy = "scarb --profile release build && node --loader ts-node/esm ./scripts/callProxy.ts"
 checkShutdownStatus = "scarb --profile release build && node --loader ts-node/esm ./scripts/checkShutdownStatus.ts"
-test = "snforge test"
+test = "snforge test 'managed_vault'"
