@@ -15,6 +15,9 @@ pub trait PositionTrait {
 
 impl PositionImpl of PositionTrait {
     fn hash(self: @Position) -> felt252 {
+        if self.is_zero() {
+            return Zero::zero();
+        }
         PositionLegacyHash::hash(0, *self)
     }
 }
@@ -92,7 +95,7 @@ pub mod position_list_component {
         }
 
         /// Adds a position to the beginning of the list
-        fn push_front(ref self: ComponentState<TContractState>, position_to_add: Position,) {
+        fn push_front(ref self: ComponentState<TContractState>, position_to_add: Position) {
             assert!(position_to_add != Zero::zero(), "cannot-push-zero");
             let first = self.first();
             if first != Zero::zero() {

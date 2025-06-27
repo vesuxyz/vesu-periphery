@@ -42,7 +42,10 @@ pub struct Claim {
 pub trait IManagedVault<TContractState> {
     fn set_manager(ref self: TContractState, manager: ContractAddress);
     fn set_price_source(ref self: TContractState, extension: ContractAddress, pool_id: felt252);
-    fn modify_delegation(ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool);
+    fn price_source(self: @TContractState) -> (ContractAddress, felt252);
+    fn modify_delegation(
+        ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool
+    );
     fn set_redemption_timeout(ref self: TContractState, timeout: u64);
     fn approve_singleton(ref self: TContractState);
     fn claim_rewards(
@@ -101,15 +104,13 @@ pub mod ManagedVault {
             ModifyPositionParams, Amount, AmountType, AmountDenomination, AssetConfig,
             UpdatePositionResponse
         },
-        units::SCALE,
-        singleton::{Singleton, ISingletonDispatcher, ISingletonDispatcherTrait},
+        units::SCALE, singleton::{Singleton, ISingletonDispatcher, ISingletonDispatcherTrait},
         v_token::{IVToken, IVTokenDispatcher, IVTokenDispatcherTrait},
         vendor::{
             erc20::{ERC20ABIDispatcher as IERC20Dispatcher, ERC20ABIDispatcherTrait},
             erc20_component::ERC20Component
         },
-        common::{i257, i257_new, calculate_collateral_and_debt_value},
-        math::pow_10,
+        common::{i257, i257_new, calculate_collateral_and_debt_value}, math::pow_10,
         extension::interface::{IExtensionDispatcher, IExtensionDispatcherTrait}
     };
     use vesu_periphery::{
@@ -208,16 +209,6 @@ pub mod ManagedVault {
         self.redemption_timeout.write(redemption_timeout);
     }
 
-    fn convert_to_assets(total_supply: u256, nav: u256, shares_delta: u256) -> u256 {
-        let index = if total_supply == 0 { SCALE } else { nav * SCALE / total_supply };
-        shares_delta * index / SCALE
-    }
-
-    fn convert_to_shares(total_supply: u256, nav: u256, assets_delta: u256) -> u256 {
-        let index = if total_supply == 0 { SCALE } else { nav * SCALE / total_supply };
-        assets_delta * SCALE / index
-    }
-
     #[generate_trait]
     impl InternalFunctions of InternalFunctionsTrait {
         fn assert_manager(ref self: ContractState) {
@@ -259,6 +250,28 @@ pub mod ManagedVault {
                 self.position_list.remove(Position { pool_id, collateral_asset, debt_asset });
             }
         }
+
+        fn compute_index(self: @ContractState, total_supply: u256, nav: u256) -> u256 {
+            if total_supply == 0 {
+                SCALE
+            } else {
+                nav * SCALE / total_supply
+            }
+        }
+
+        fn convert_to_assets(
+            self: @ContractState, total_supply: u256, nav: u256, shares_delta: u256
+        ) -> u256 {
+            let index = self.compute_index(total_supply, nav);
+            (shares_delta * index / SCALE) * self.scale.read() / SCALE
+        }
+
+        fn convert_to_shares(
+            self: @ContractState, total_supply: u256, nav: u256, assets_delta: u256
+        ) -> u256 {
+            let index = self.compute_index(total_supply, nav);
+            (assets_delta * SCALE / self.scale.read()) * SCALE / index
+        }
     }
 
     #[abi(embed_v0)]
@@ -288,6 +301,10 @@ pub mod ManagedVault {
             self.price_source.write((extension, pool_id));
         }
 
+        fn price_source(self: @ContractState) -> (ContractAddress, felt252) {
+            self.price_source.read()
+        }
+
         /// Re-approves the vToken to be spendable by the extension
         fn approve_singleton(ref self: ContractState) {
             self.asset.read().approve(self.singleton.read().contract_address, BoundedInt::max());
@@ -298,7 +315,9 @@ pub mod ManagedVault {
             self.redemption_timeout.write(timeout);
         }
 
-        fn modify_delegation(ref self: ContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool) {
+        fn modify_delegation(
+            ref self: ContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool
+        ) {
             self.assert_manager();
             self.singleton.read().modify_delegation(pool_id, delegatee, delegation);
         }
@@ -433,23 +452,25 @@ pub mod ManagedVault {
             };
 
             let (extension, pool_id) = self.price_source.read();
-            let price = IExtensionDispatcher { contract_address: extension }.price(pool_id, self.asset.read().contract_address);
+            let price = IExtensionDispatcher { contract_address: extension }
+                .price(pool_id, self.asset.read().contract_address);
             assets += balance * price.value / self.scale.read();
-            
+
             assets - liabilities
         }
 
         fn deposit(ref self: ContractState, assets: u256, receiver: ContractAddress) -> u256 {
             self.transfer_asset(get_caller_address(), get_contract_address(), assets);
 
-            let vault_shares = convert_to_shares(self.erc20.total_supply(), self.nav(), assets);
+            let vault_shares = self
+                .convert_to_shares(self.erc20.total_supply(), self.nav(), assets);
             self.erc20._mint(receiver, vault_shares);
 
             vault_shares
         }
 
         fn mint(ref self: ContractState, shares: u256, receiver: ContractAddress) -> u256 {
-            let assets = convert_to_assets(self.erc20.total_supply(), self.nav(), shares);
+            let assets = self.convert_to_assets(self.erc20.total_supply(), self.nav(), shares);
 
             self.transfer_asset(get_caller_address(), get_contract_address(), assets);
 
@@ -466,17 +487,23 @@ pub mod ManagedVault {
                 .read(owner);
 
             assert!(
-                timestamp + self.redemption_timeout.read() > get_block_timestamp(), "redeem-timeout"
+                timestamp + self.redemption_timeout.read() >= get_block_timestamp(),
+                "redeem-timeout"
             );
 
-            let mut per_share_nav = convert_to_assets(self.erc20.total_supply(), self.nav(), SCALE);
+            let mut per_share_nav = self.compute_index(self.erc20.total_supply(), self.nav());
             if per_share_nav > nav_per_share_at_request {
                 per_share_nav = nav_per_share_at_request
             }
 
-            let assets = shares * per_share_nav / SCALE;
+            println!("per_share_nav: {}", per_share_nav);
+            let assets = (shares * per_share_nav / SCALE) * self.scale.read() / SCALE;
+
+            println!("assets: {}", assets);
 
             self.erc20._burn(owner, shares);
+
+            println!("balance: {}", self.asset.read().balanceOf(get_contract_address()));
 
             self.transfer_asset(get_contract_address(), receiver, assets);
 
@@ -486,7 +513,7 @@ pub mod ManagedVault {
         fn request_redeem(ref self: ContractState, shares: u256) {
             assert!(self.erc20.balance_of(get_caller_address()) >= shares, "insufficient-shares");
 
-            let per_share_nav = convert_to_assets(self.erc20.total_supply(), self.nav(), SCALE);
+            let per_share_nav = self.compute_index(self.erc20.total_supply(), self.nav());
 
             self
                 .redemption_requests
