@@ -343,6 +343,7 @@ pub mod ManagedVault {
             self.assert_manager();
             // TODO What if the interface changes?
             // TODO Shouldn't this do more? Like swap + modify position?
+            // TODO Check, should the reward contract be approved by the manager?
             IMerkleDistributorDispatcher { contract_address: rewards_contract }
                 .claim(claim.amount, proof);
         }
