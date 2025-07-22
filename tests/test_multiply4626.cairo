@@ -67,7 +67,7 @@ mod Test_974640_Multiply4626 {
         };
 
         let eth = IERC20Dispatcher {
-            contract_address: 0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004d
+            contract_address: 0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
                 .try_into()
                 .unwrap(),
         };
