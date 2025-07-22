@@ -1,6 +1,6 @@
-use core::num::traits::zero::Zero;
 use core::hash::LegacyHash;
-use starknet::{ContractAddress, contract_address_const};
+use core::num::traits::zero::Zero;
+use starknet::ContractAddress;
 
 #[derive(PartialEq, Copy, Drop, starknet::Store)]
 pub struct Position {
@@ -24,12 +24,10 @@ impl PositionImpl of PositionTrait {
 
 impl PositionZero of Zero<Position> {
     fn zero() -> Position {
-        Position { pool_id: 0, collateral_asset: Zero::zero(), debt_asset: Zero::zero(), }
+        Position { pool_id: 0, collateral_asset: Zero::zero(), debt_asset: Zero::zero() }
     }
     fn is_zero(self: @Position) -> bool {
-        *self.pool_id == 0
-            && *self.collateral_asset == contract_address_const::<''>()
-            && *self.debt_asset == contract_address_const::<''>()
+        *self.pool_id == 0 && self.collateral_asset.is_zero() && self.debt_asset.is_zero()
     }
     fn is_non_zero(self: @Position) -> bool {
         !self.is_zero()
@@ -49,14 +47,14 @@ impl PositionLegacyHash of LegacyHash<Position> {
 #[starknet::component]
 pub mod position_list_component {
     use core::num::traits::zero::Zero;
-
+    use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess};
     use super::{Position, PositionTrait};
 
     #[storage]
-    struct Storage {
+    pub struct Storage {
         // A list of positions
         // hash(position) -> next position
-        positions: LegacyMap<felt252, Position>,
+        positions: Map<felt252, Position>,
     }
 
     #[event]
@@ -65,10 +63,11 @@ pub mod position_list_component {
 
     #[generate_trait]
     pub impl PositionListTrait<
-        TContractState, +HasComponent<TContractState>
+        TContractState, +HasComponent<TContractState>,
     > of Trait<TContractState> {
         /// Returns true if the list contains the position
-        /// Constant computation cost if `position` is in fact in the list AND it's not the last one.
+        /// Constant computation cost if `position` is in fact in the list AND it's not the last
+        /// one.
         /// Otherwise cost increases with the list size.
         fn contains(self: @ComponentState<TContractState>, position: Position) -> bool {
             if position == Zero::zero() {
@@ -104,7 +103,8 @@ pub mod position_list_component {
             self.positions.write(Zero::zero(), position_to_add);
         }
 
-        /// Removes a position from the list. Reverts if the position is not found. Cost increases with the list size.
+        /// Removes a position from the list. Reverts if the position is not found. Cost increases
+        /// with the list size.
         fn remove(ref self: ComponentState<TContractState>, position: Position) {
             assert!(position != Zero::zero(), "cannot-remove-zero");
             // position pointer set to 0, Previous pointer set to the next in the list
@@ -143,18 +143,18 @@ pub mod position_list_component {
             while current_position != Zero::zero() {
                 positions.append(current_position);
                 current_position = self.positions.read(current_position.hash());
-            };
+            }
             positions
         }
     }
 
     #[generate_trait]
     impl Private<TContractState, +HasComponent<TContractState>> of PrivateTrait<TContractState> {
-        /// Returns the position before `position_after` or Zero if the position is the first one. 
+        /// Returns the position before `position_after` or Zero if the position is the first one.
         /// Reverts if `position_after` is not found
         /// Cost increases with the list size
         fn find_position_before(
-            self: @ComponentState<TContractState>, position_after: Position
+            self: @ComponentState<TContractState>, position_after: Position,
         ) -> Position {
             let mut current_position: Position = Zero::zero();
             loop {
