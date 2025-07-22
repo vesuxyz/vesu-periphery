@@ -12,7 +12,7 @@ vesu = { git = "https://github.com/vesuxyz/vesu-v1", branch = "feat/2.11.4" }
 alexandria_math = { git = "https://github.com/keep-starknet-strange/alexandria.git", rev = "c804e98" }
 
 [dev-dependencies]
-snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry", tag = "v0.21.0" }
+snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry", tag = "v0.46.0" }
 
 [[target.starknet-contract]]
 casm = true
