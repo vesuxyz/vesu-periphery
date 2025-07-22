@@ -66,7 +66,7 @@ pub trait IManagedVault<TContractState> {
     ) -> ModifyLeverResponse;
     fn nav(self: @TContractState) -> u256;
     fn modify_asset(ref self: TContractState, asset: ContractAddress, is_approved: bool);
-    fn get_asset_status(ref self: TContractState, asset: ContractAddress) -> bool;
+    fn is_asset_approved(self: @TContractState, asset: ContractAddress) -> bool;
 
     // User related functions
     fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
@@ -217,7 +217,7 @@ pub mod ManagedVault {
         }
 
         fn assert_asset_approved(self: @ContractState, asset: ContractAddress) {
-            assert!(self.asset_list.read(asset), "asset-not-approved");
+            assert!(self.is_asset_approved(asset), "asset-not-approved");
         }
 
         fn transfer_asset(
@@ -318,7 +318,7 @@ pub mod ManagedVault {
             self.asset_list.write(asset, is_approved);
         }
 
-        fn get_asset_status(ref self: ContractState, asset: ContractAddress) -> bool {
+        fn is_asset_approved(self: @ContractState, asset: ContractAddress) -> bool {
             self.asset_list.read(asset)
         }
 
