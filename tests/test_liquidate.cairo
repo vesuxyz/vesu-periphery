@@ -127,7 +127,7 @@ mod Test_896150_Liquidate {
 
         let loaded = load(usdt.contract_address, selector!("permitted_minter"), 1);
         let minter: ContractAddress = (*loaded[0]).try_into().unwrap();
-        cheat_caller_address(usdc.contract_address, minter, CheatSpan::TargetCalls(1));
+        cheat_caller_address(usdt.contract_address, minter, CheatSpan::TargetCalls(1));
         IStarkgateERC20Dispatcher { contract_address: usdt.contract_address }
             .permissioned_mint(user, 100000_000_000);
 
@@ -209,7 +209,7 @@ mod Test_896150_Liquidate {
 
         assert!(usdc.balanceOf(liquidator) == 0);
 
-        cheat_caller_address(liquidator, liquidate.contract_address, CheatSpan::TargetCalls(1));
+        cheat_caller_address(liquidate.contract_address, liquidator, CheatSpan::TargetCalls(1));
 
         let response: LiquidateResponse = liquidate
             .liquidate(
@@ -317,7 +317,7 @@ mod Test_896150_Liquidate {
 
         assert!(usdc.balanceOf(liquidator) == 0);
 
-        cheat_caller_address(liquidator, liquidate.contract_address, CheatSpan::TargetCalls(1));
+        cheat_caller_address(liquidate.contract_address, liquidator, CheatSpan::TargetCalls(1));
         let response: LiquidateResponse = liquidate
             .liquidate(
                 LiquidateParams {
@@ -424,7 +424,7 @@ mod Test_896150_Liquidate {
 
         assert!(usdc.balanceOf(liquidator) == 0);
 
-        cheat_caller_address(liquidator, liquidate.contract_address, CheatSpan::TargetCalls(1));
+        cheat_caller_address(liquidate.contract_address, liquidator, CheatSpan::TargetCalls(1));
 
         let response: LiquidateResponse = liquidate
             .liquidate(
@@ -579,7 +579,7 @@ mod Test_896150_Liquidate {
 
         assert!(usdc.balanceOf(liquidator) == 0);
 
-        cheat_caller_address(liquidator, liquidate.contract_address, CheatSpan::TargetCalls(1));
+        cheat_caller_address(liquidate.contract_address, liquidator, CheatSpan::TargetCalls(1));
 
         let response: LiquidateResponse = liquidate
             .liquidate(
@@ -680,7 +680,7 @@ mod Test_896150_Liquidate {
                                         token0: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
                                             .try_into()
                                             .unwrap(),
-                                        token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb
+                                        token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8
                                             .try_into()
                                             .unwrap(),
                                         fee: 0x20c49ba5e353f80000000000000000,
@@ -695,7 +695,7 @@ mod Test_896150_Liquidate {
                                         token0: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
                                             .try_into()
                                             .unwrap(),
-                                        token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb
+                                        token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8
                                             .try_into()
                                             .unwrap(),
                                         fee: 0x14f8b588e368f1000000000000000,
@@ -792,13 +792,11 @@ mod Test_896150_Liquidate {
 
         mock_pragma_oracle.set_price('USDC/USD', SCALE_128 * 8 / 10);
 
-        let liquidator = 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
-            .try_into()
-            .unwrap();
+        let liquidator = 'liquidator'.try_into().unwrap();
 
         assert!(usdc.balanceOf(liquidator) == 0);
 
-        cheat_caller_address(liquidator, liquidate.contract_address, CheatSpan::TargetCalls(1));
+        cheat_caller_address(liquidate.contract_address, liquidator, CheatSpan::TargetCalls(1));
 
         liquidate
             .liquidate(
@@ -899,7 +897,7 @@ mod Test_896150_Liquidate {
                                         token0: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
                                             .try_into()
                                             .unwrap(),
-                                        token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb
+                                        token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8
                                             .try_into()
                                             .unwrap(),
                                         fee: 0x20c49ba5e353f80000000000000000,
@@ -914,7 +912,7 @@ mod Test_896150_Liquidate {
                                         token0: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
                                             .try_into()
                                             .unwrap(),
-                                        token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb
+                                        token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8
                                             .try_into()
                                             .unwrap(),
                                         fee: 0x14f8b588e368f1000000000000000,

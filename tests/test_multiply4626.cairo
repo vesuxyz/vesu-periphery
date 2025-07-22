@@ -87,12 +87,12 @@ mod Test_974640_Multiply4626 {
                 .unwrap(),
         };
         let xstrk = IERC20Dispatcher {
-            contract_address: 0x028d709c875c0ceac3dce7065bec5328186dc89fe254527084d1689910954b
+            contract_address: 0x028d709c875c0ceac3dce7065bec5328186dc89fe254527084d1689910954b0a
                 .try_into()
                 .unwrap(),
         };
         let sstrk = IERC20Dispatcher {
-            contract_address: 0x0356f304b154d29d2a8fe22f1cb9107a9b564a733cf6b4cc47fd121ac1af90
+            contract_address: 0x0356f304b154d29d2a8fe22f1cb9107a9b564a733cf6b4cc47fd121ac1af90c9
                 .try_into()
                 .unwrap(),
         };

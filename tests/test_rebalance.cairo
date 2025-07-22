@@ -132,7 +132,7 @@ mod Test_896150_Rebalance {
 
         let loaded = load(usdt.contract_address, selector!("permitted_minter"), 1);
         let minter: ContractAddress = (*loaded[0]).try_into().unwrap();
-        cheat_caller_address((usdt.contract_address), minter, CheatSpan::TargetCalls(1));
+        cheat_caller_address(usdt.contract_address, minter, CheatSpan::TargetCalls(1));
         IStarkgateERC20Dispatcher { contract_address: usdt.contract_address }
             .permissioned_mint(user, 10000_000_000);
 
@@ -661,7 +661,7 @@ mod Test_896150_Rebalance {
         let target_ltv_tolerance = (SCALE / 100).try_into().unwrap();
         let target_ltv_min_delta = target_ltv_tolerance + 1;
 
-        cheat_caller_address((rebalance.contract_address), user, CheatSpan::TargetCalls(1));
+        cheat_caller_address(rebalance.contract_address, user, CheatSpan::TargetCalls(1));
         rebalance
             .set_target_ltv_config(
                 pool_id,

@@ -1347,7 +1347,7 @@ mod Test_896150_Multiply {
                         },
                         RouteNode {
                             pool_key: PoolKey {
-                                token0: 0x3b405a98c9e795d427fe82cdeeeed803f221b52471e3a757574a2b4180793e
+                                token0: 0x3b405a98c9e795d427fe82cdeeeed803f221b52471e3a757574a2b4180793ee
                                     .try_into()
                                     .unwrap(),
                                 token1: 0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d
@@ -1355,7 +1355,7 @@ mod Test_896150_Multiply {
                                     .unwrap(),
                                 fee: 0xc49ba5e353f7d00000000000000000,
                                 tick_spacing: 354892,
-                                extension: 0x43e4f09c32d13d43a880e85f69f7de93ceda62d6cf2581a582c6db635548fd
+                                extension: 0x43e4f09c32d13d43a880e85f69f7de93ceda62d6cf2581a582c6db635548fdc
                                     .try_into()
                                     .unwrap(),
                             },
@@ -1364,7 +1364,7 @@ mod Test_896150_Multiply {
                         },
                         RouteNode {
                             pool_key: PoolKey {
-                                token0: 0x3b405a98c9e795d427fe82cdeeeed803f221b52471e3a757574a2b4180793e
+                                token0: 0x3b405a98c9e795d427fe82cdeeeed803f221b52471e3a757574a2b4180793ee
                                     .try_into()
                                     .unwrap(),
                                 token1: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8

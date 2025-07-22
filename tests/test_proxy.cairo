@@ -309,7 +309,7 @@ mod Test_Proxy {
                 pauser, extension.contract_address, selector!("set_shutdown_ltv_config"), true,
             );
 
-        cheat_caller_address((proxy.contract_address), pauser, CheatSpan::TargetCalls(1));
+        cheat_caller_address(proxy.contract_address, pauser, CheatSpan::TargetCalls(1));
 
         let mut ltv_config_serialized = array![];
         LTVConfig { max_ltv: 0 }.serialize(ref ltv_config_serialized);

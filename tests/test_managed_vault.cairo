@@ -110,13 +110,13 @@ mod Test_896150_ManagedVault {
 
         let loaded = load(usdc.contract_address, selector!("permitted_minter"), 1);
         let minter: ContractAddress = (*loaded[0]).try_into().unwrap();
-        cheat_caller_address((usdc.contract_address), minter, CheatSpan::TargetCalls(1));
+        cheat_caller_address(usdc.contract_address, minter, CheatSpan::TargetCalls(1));
         IStarkgateERC20Dispatcher { contract_address: usdc.contract_address }
             .permissioned_mint(user, 10000_000_000);
 
         let loaded = load(usdt.contract_address, selector!("permitted_minter"), 1);
         let minter: ContractAddress = (*loaded[0]).try_into().unwrap();
-        cheat_caller_address((usdt.contract_address), minter, CheatSpan::TargetCalls(1));
+        cheat_caller_address(usdt.contract_address, minter, CheatSpan::TargetCalls(1));
         IStarkgateERC20Dispatcher { contract_address: usdt.contract_address }
             .permissioned_mint(user, 10010_000_000);
 
