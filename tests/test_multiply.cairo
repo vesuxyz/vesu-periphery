@@ -1118,7 +1118,7 @@ mod Test_896150_Multiply {
                                 token1: eth.contract_address,
                                 fee: 0x28f5c28f5c28f5c28f5c28f5c28f5c2,
                                 tick_spacing: 354892,
-                                extension: 0x43e4f09c32d13d43a880e85f69f7de93ceda62d6cf2581a582c6db635548fd
+                                extension: 0x43e4f09c32d13d43a880e85f69f7de93ceda62d6cf2581a582c6db635548fdc
                                     .try_into()
                                     .unwrap(),
                             },
