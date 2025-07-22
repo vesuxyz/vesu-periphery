@@ -50,7 +50,7 @@ mod Test_974640_Multiply4626 {
 
     fn setup() -> TestConfig {
         let ekubo = ICoreDispatcher {
-            contract_address: 0x00000005dd3D2F4429AF886cD1a3b08289DBcEa99A294197E9eB43b0e0325b
+            contract_address: 0x00000005dd3D2F4429AF886cD1a3b08289DBcEa99A294197E9eB43b0e0325b4b
                 .try_into()
                 .unwrap(),
         };
