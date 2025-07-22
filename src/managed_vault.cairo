@@ -65,6 +65,8 @@ pub trait IManagedVault<TContractState> {
         ref self: TContractState, modify_lever_params: ModifyLeverParams,
     ) -> ModifyLeverResponse;
     fn nav(self: @TContractState) -> u256;
+    fn modify_asset(ref self: TContractState, asset: ContractAddress, is_approved: bool);
+    fn get_asset_status(ref self: TContractState, asset: ContractAddress) -> bool;
 
     // User related functions
     fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
@@ -154,6 +156,8 @@ pub mod ManagedVault {
         // Map of redemption requests
         // (user, (timestamp, shares, nav_per_share_at_request))
         redemption_requests: Map<ContractAddress, (u64, u256, u256)>,
+        // TODO Name
+        asset_list: Map<ContractAddress, bool>,
         // storage for the timestamp manager component
         #[substorage(v0)]
         position_list: position_list_component::Storage,
@@ -211,6 +215,11 @@ pub mod ManagedVault {
         fn assert_owner(ref self: ContractState) {
             assert!(get_caller_address() == self.owner.read(), "caller-not-owner");
         }
+
+        fn assert_asset_approved(self: @ContractState, asset: ContractAddress) {
+            assert!(self.asset_list.read(asset), "asset-not-approved");
+        }
+
         fn transfer_asset(
             self: @ContractState, sender: ContractAddress, to: ContractAddress, amount: u256,
         ) {
@@ -228,6 +237,8 @@ pub mod ManagedVault {
         fn _swap(ref self: ContractState, params: SwapParams) {
             let core = self.ekubo_core.read();
             let (input_amount, output_amount) = swap(core, params.swap, params.limit_amount);
+            self.assert_asset_approved(input_amount.token);
+            self.assert_asset_approved(output_amount.token);
             handle_delta(core, output_amount.token, output_amount.amount, get_contract_address());
             handle_delta(core, input_amount.token, input_amount.amount, get_contract_address());
         }
@@ -301,6 +312,16 @@ pub mod ManagedVault {
             self.price_source.read()
         }
 
+
+        fn modify_asset(ref self: ContractState, asset: ContractAddress, is_approved: bool) {
+            self.assert_owner();
+            self.asset_list.write(asset, is_approved);
+        }
+
+        fn get_asset_status(ref self: ContractState, asset: ContractAddress) -> bool {
+            self.asset_list.read(asset)
+        }
+
         fn set_redemption_timeout(ref self: ContractState, timeout: u64) {
             self.assert_owner();
             self.redemption_timeout.write(timeout);
@@ -328,6 +349,10 @@ pub mod ManagedVault {
         fn swap(ref self: ContractState, swap: Array<Swap>, limit_amount: u128) {
             self.assert_manager();
             assert!(limit_amount > 0, "invalid-limit-amount");
+            assert!(swap.len() > 0, "invalid-swap");
+            self.assert_asset_approved(*swap[0].token_amount.token);
+            // TODO How to/Should we check the token out is approved?
+            // self.assert_asset_approved(*swap[swap.len() - 1].token_amount.token);
             // TODO Protect with an oracle enforced min slippage
             call_core_with_callback(self.ekubo_core.read(), @SwapParams { swap, limit_amount })
         }
@@ -341,6 +366,9 @@ pub mod ManagedVault {
             debt: Amount,
         ) -> UpdatePositionResponse {
             self.assert_manager();
+            self.assert_asset_approved(collateral_asset);
+            self.assert_asset_approved(debt_asset);
+
             let singleton = self.singleton.read();
 
             let (position_before, _, _) = singleton
@@ -353,8 +381,8 @@ pub mod ManagedVault {
                         collateral_asset,
                         debt_asset,
                         user: get_contract_address(),
-                        collateral: collateral,
-                        debt: debt,
+                        collateral,
+                        debt,
                         data: array![].span(),
                     },
                 );
@@ -395,6 +423,9 @@ pub mod ManagedVault {
                     params.lever_swap_limit_amount,
                 ),
             };
+
+            self.assert_asset_approved(collateral_asset);
+            self.assert_asset_approved(debt_asset);
 
             assert!(lever_swap_limit_amount > 0, "invalid-lever-swap-limit-amount");
 
@@ -444,7 +475,8 @@ pub mod ManagedVault {
                 self.asset.read().balance_of(get_contract_address())
             };
 
-            let (extension, pool_id) = self.price_source.read();
+            let (extension, pool_id) = self.price_source();
+            // TODO Use pragma instead?
             let price = IExtensionDispatcher { contract_address: extension }
                 .price(pool_id, self.asset.read().contract_address);
             assets += balance * price.value / self.scale.read();
