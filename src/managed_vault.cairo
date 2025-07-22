@@ -351,9 +351,9 @@ pub mod ManagedVault {
             self.assert_manager();
             assert!(limit_amount > 0, "invalid-limit-amount");
             assert!(swap.len() > 0, "invalid-swap");
-            self.assert_asset_approved(*swap[0].token_amount.token);
-            // TODO How to/Should we check the token out is approved?
-            // self.assert_asset_approved(*swap[swap.len() - 1].token_amount.token);
+            for local_swap in swap.span() {
+                self.assert_asset_approved(*local_swap.token_amount.token);
+            }
             // TODO Protect with an oracle enforced min slippage
             call_core_with_callback(self.ekubo_core.read(), @SwapParams { swap, limit_amount })
         }
