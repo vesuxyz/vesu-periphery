@@ -32,13 +32,13 @@ mod Test_Proxy {
                 .unwrap(),
         };
         let usdc = IERC20Dispatcher {
-            contract_address: 0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368
+            contract_address: 0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
                 .try_into()
                 .unwrap(),
         };
 
         let singleton = ISingletonV2Dispatcher {
-            contract_address: 0x2545b2e5d519fc230e9cd781046d3a64e092114f07e44771e0d719d148725e
+            contract_address: 0x2545b2e5d519fc230e9cd781046d3a64e092114f07e44771e0d719d148725ef
                 .try_into()
                 .unwrap(),
         };

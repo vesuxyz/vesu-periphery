@@ -51,7 +51,7 @@ mod Test_896150_Liquidate {
                 .unwrap(),
         };
         let singleton = ISingletonV2Dispatcher {
-            contract_address: 0x2545b2e5d519fc230e9cd781046d3a64e092114f07e44771e0d719d148725e
+            contract_address: 0x2545b2e5d519fc230e9cd781046d3a64e092114f07e44771e0d719d148725ef
                 .try_into()
                 .unwrap(),
         };
@@ -68,17 +68,17 @@ mod Test_896150_Liquidate {
                 .unwrap(),
         };
         let usdc = IERC20Dispatcher {
-            contract_address: 0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368
+            contract_address: 0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
                 .try_into()
                 .unwrap(),
         };
         let usdt = IERC20Dispatcher {
-            contract_address: 0x068f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0f
+            contract_address: 0x068f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8
                 .try_into()
                 .unwrap(),
         };
         let strk = IERC20Dispatcher {
-            contract_address: 0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938
+            contract_address: 0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d
                 .try_into()
                 .unwrap(),
         };
@@ -618,10 +618,10 @@ mod Test_896150_Liquidate {
                             route: array![
                                 RouteNode {
                                     pool_key: PoolKey {
-                                        token0: 0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938
+                                        token0: 0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d
                                             .try_into()
                                             .unwrap(),
-                                        token1: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc
+                                        token1: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
                                             .try_into()
                                             .unwrap(),
                                         fee: 0x68db8bac710cb4000000000000000,
@@ -633,10 +633,10 @@ mod Test_896150_Liquidate {
                                 },
                                 RouteNode {
                                     pool_key: PoolKey {
-                                        token0: 0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938
+                                        token0: 0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d
                                             .try_into()
                                             .unwrap(),
-                                        token1: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a
+                                        token1: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
                                             .try_into()
                                             .unwrap(),
                                         fee: 0x20c49ba5e353f80000000000000000,
@@ -655,10 +655,10 @@ mod Test_896150_Liquidate {
                             route: array![
                                 RouteNode {
                                     pool_key: PoolKey {
-                                        token0: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc
+                                        token0: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
                                             .try_into()
                                             .unwrap(),
-                                        token1: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a
+                                        token1: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
                                             .try_into()
                                             .unwrap(),
                                         fee: 0x68db8bac710cb4000000000000000,
@@ -677,7 +677,7 @@ mod Test_896150_Liquidate {
                             route: array![
                                 RouteNode {
                                     pool_key: PoolKey {
-                                        token0: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc
+                                        token0: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
                                             .try_into()
                                             .unwrap(),
                                         token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb
@@ -692,7 +692,7 @@ mod Test_896150_Liquidate {
                                 },
                                 RouteNode {
                                     pool_key: PoolKey {
-                                        token0: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a
+                                        token0: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
                                             .try_into()
                                             .unwrap(),
                                         token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb
@@ -792,7 +792,7 @@ mod Test_896150_Liquidate {
 
         mock_pragma_oracle.set_price('USDC/USD', SCALE_128 * 8 / 10);
 
-        let liquidator = 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc
+        let liquidator = 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
             .try_into()
             .unwrap();
 
@@ -837,10 +837,10 @@ mod Test_896150_Liquidate {
                             route: array![
                                 RouteNode {
                                     pool_key: PoolKey {
-                                        token0: 0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938
+                                        token0: 0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d
                                             .try_into()
                                             .unwrap(),
-                                        token1: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc
+                                        token1: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
                                             .try_into()
                                             .unwrap(),
                                         fee: 0x68db8bac710cb4000000000000000,
@@ -852,10 +852,10 @@ mod Test_896150_Liquidate {
                                 },
                                 RouteNode {
                                     pool_key: PoolKey {
-                                        token0: 0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938
+                                        token0: 0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d
                                             .try_into()
                                             .unwrap(),
-                                        token1: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a
+                                        token1: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
                                             .try_into()
                                             .unwrap(),
                                         fee: 0x20c49ba5e353f80000000000000000,
@@ -874,10 +874,10 @@ mod Test_896150_Liquidate {
                             route: array![
                                 RouteNode {
                                     pool_key: PoolKey {
-                                        token0: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc
+                                        token0: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
                                             .try_into()
                                             .unwrap(),
-                                        token1: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a
+                                        token1: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
                                             .try_into()
                                             .unwrap(),
                                         fee: 0x68db8bac710cb4000000000000000,
@@ -896,7 +896,7 @@ mod Test_896150_Liquidate {
                             route: array![
                                 RouteNode {
                                     pool_key: PoolKey {
-                                        token0: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc
+                                        token0: 0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
                                             .try_into()
                                             .unwrap(),
                                         token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb
@@ -911,7 +911,7 @@ mod Test_896150_Liquidate {
                                 },
                                 RouteNode {
                                     pool_key: PoolKey {
-                                        token0: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a
+                                        token0: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
                                             .try_into()
                                             .unwrap(),
                                         token1: 0x68f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb
