@@ -604,11 +604,6 @@ mod Test_896150_Liquidate {
                                             .unwrap(),
                                         fee: 0x20c49ba5e353f80000000000000000,
                                         tick_spacing: 1000,
-                                        token1: 0x53c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a
-                                            .try_into()
-                                            .unwrap(),
-                                        fee: 0x20c49ba5e353f80000000000000000,
-                                        tick_spacing: 1000,
                                         extension: 0x0.try_into().unwrap(),
                                     },
                                     sqrt_ratio_limit: MAX_SQRT_RATIO_LIMIT,

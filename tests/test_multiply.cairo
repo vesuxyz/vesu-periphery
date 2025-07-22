@@ -7,18 +7,16 @@ trait IStarkgateERC20<TContractState> {
 
 #[cfg(test)]
 mod Test_896150_Multiply {
-    use alexandria_math::i257::{I257Trait, i257};
+    use alexandria_math::i257::I257Trait;
     use core::num::traits::Zero;
-    use ekubo::interfaces::core::{ICoreDispatcher, ICoreDispatcherTrait, ILocker, SwapParameters};
+    use ekubo::interfaces::core::ICoreDispatcher;
     use ekubo::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
-    use ekubo::types::i129::i129Trait;
     use ekubo::types::keys::PoolKey;
     use snforge_std::{CheatSpan, cheat_caller_address, load};
-    use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
-    use vesu::data_model::{Amount, AmountDenomination, AmountType, ModifyPositionParams};
+    use starknet::{ContractAddress, get_contract_address};
     use vesu::singleton_v2::{ISingletonV2Dispatcher, ISingletonV2DispatcherTrait};
     use vesu::test::setup_v2::deploy_with_args;
-    use vesu::units::{SCALE, SCALE_128};
+    use vesu::units::SCALE_128;
     use vesu_periphery::i129_new;
     use vesu_periphery::multiply::{
         DecreaseLeverParams, IMultiplyDispatcher, IMultiplyDispatcherTrait, IncreaseLeverParams,
