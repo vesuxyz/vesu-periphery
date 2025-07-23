@@ -45,7 +45,7 @@ pub trait IManagedVault<TContractState> {
         ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool,
     );
     fn modify_pool_id_status(ref self: TContractState, pool_id: felt252, is_accepted: bool);
-    fn is_pool_id_accepted(self: @TContractState, pool_id: felt252) -> bool;
+    fn is_pool_id_approved(self: @TContractState, pool_id: felt252) -> bool;
 
     // Management functions
     fn claim_rewards(
@@ -217,8 +217,8 @@ pub mod ManagedVault {
             assert!(get_caller_address() == self.owner.read(), "caller-not-owner");
         }
 
-        fn assert_pool_id_accepted(ref self: ContractState, pool_id: felt252) {
-            assert!(self.is_pool_id_accepted(pool_id), "pool-not-accepted");
+        fn assert_pool_id_approved(ref self: ContractState, pool_id: felt252) {
+            assert!(self.is_pool_id_approved(pool_id), "pool-not-accepted");
         }
 
         fn transfer_asset(
@@ -328,7 +328,7 @@ pub mod ManagedVault {
             self.accepted_pool_ids.write(pool_id, is_accepted);
         }
 
-        fn is_pool_id_accepted(self: @ContractState, pool_id: felt252) -> bool {
+        fn is_pool_id_approved(self: @ContractState, pool_id: felt252) -> bool {
             self.accepted_pool_ids.read(pool_id)
         }
 
@@ -360,7 +360,7 @@ pub mod ManagedVault {
             debt: Amount,
         ) -> UpdatePositionResponse {
             self.assert_manager();
-            self.assert_pool_id_accepted(pool_id);
+            self.assert_pool_id_approved(pool_id);
 
             let singleton = self.singleton.read();
 
@@ -418,7 +418,7 @@ pub mod ManagedVault {
                 ),
             };
 
-            self.assert_pool_id_accepted(pool_id);
+            self.assert_pool_id_approved(pool_id);
             assert!(lever_swap_limit_amount > 0, "invalid-lever-swap-limit-amount");
 
             let (position_before, _, _) = singleton
