@@ -238,8 +238,6 @@ pub mod ManagedVault {
         fn _swap(ref self: ContractState, params: SwapParams) {
             let core = self.ekubo_core.read();
             let (input_amount, output_amount) = swap(core, params.swap, params.limit_amount);
-            self.assert_asset_approved(input_amount.token);
-            self.assert_asset_approved(output_amount.token);
             handle_delta(core, output_amount.token, output_amount.amount, get_contract_address());
             handle_delta(core, input_amount.token, input_amount.amount, get_contract_address());
         }
@@ -352,9 +350,11 @@ pub mod ManagedVault {
         fn swap(ref self: ContractState, swap: Array<Swap>, limit_amount: u128) {
             self.assert_manager();
             assert!(limit_amount > 0, "invalid-limit-amount");
-            assert!(swap.len() > 0, "invalid-swap");
             for local_swap in swap.span() {
-                self.assert_asset_approved(*local_swap.token_amount.token);
+                for route_node in local_swap.route.span() {
+                    self.assert_asset_approved(*route_node.pool_key.token0);
+                    self.assert_asset_approved(*route_node.pool_key.token1);
+                }
             }
             // TODO Protect with an oracle enforced min slippage
             call_core_with_callback(self.ekubo_core.read(), @SwapParams { swap, limit_amount })
