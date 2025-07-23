@@ -156,8 +156,7 @@ pub mod ManagedVault {
         // Map of redemption requests
         // (user, (timestamp, shares, nav_per_share_at_request))
         redemption_requests: Map<ContractAddress, (u64, u256, u256)>,
-        // TODO Name
-        asset_list: Map<ContractAddress, bool>,
+        approved_asset: Map<ContractAddress, bool>,
         // storage for the timestamp manager component
         #[substorage(v0)]
         position_list: position_list_component::Storage,
@@ -315,11 +314,11 @@ pub mod ManagedVault {
 
         fn modify_asset(ref self: ContractState, asset: ContractAddress, is_approved: bool) {
             self.assert_owner();
-            self.asset_list.write(asset, is_approved);
+            self.approved_asset.write(asset, is_approved);
         }
 
         fn is_asset_approved(self: @ContractState, asset: ContractAddress) -> bool {
-            self.asset_list.read(asset)
+            self.approved_asset.read(asset)
         }
 
         fn set_redemption_timeout(ref self: ContractState, timeout: u64) {
