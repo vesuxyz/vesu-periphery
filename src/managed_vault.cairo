@@ -44,6 +44,7 @@ pub trait IManagedVault<TContractState> {
     fn modify_delegation(
         ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool,
     );
+    fn approve_singleton(ref self: TContractState);
 
     // Management functions
     fn claim_rewards(
@@ -299,6 +300,11 @@ pub mod ManagedVault {
 
         fn price_source(self: @ContractState) -> (ContractAddress, felt252) {
             self.price_source.read()
+        }
+
+        /// Re-approves the vToken to be spendable by the extension
+        fn approve_singleton(ref self: ContractState) {
+            self.asset.read().approve(self.singleton.read().contract_address, Bounded::MAX);
         }
 
         fn set_redemption_timeout(ref self: ContractState, timeout: u64) {
