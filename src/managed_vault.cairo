@@ -100,7 +100,7 @@ pub mod ManagedVault {
     };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
     use vesu::common::calculate_collateral_and_debt_value;
-    use vesu::data_model::{Amount, ModifyPositionParams, UpdatePositionResponse};
+    use vesu::data_model::{Amount, AssetPrice, ModifyPositionParams, UpdatePositionResponse};
     use vesu::extension::interface::{IExtensionDispatcher, IExtensionDispatcherTrait};
     use vesu::math::pow_10;
     use vesu::singleton_v2::{ISingletonV2Dispatcher, ISingletonV2DispatcherTrait};
@@ -219,6 +219,22 @@ pub mod ManagedVault {
 
         fn assert_asset_approved(self: @ContractState, asset: ContractAddress) {
             assert!(self.is_asset_approved(asset), "asset-not-approved");
+        }
+
+        fn assert_fair_rate(
+            self: @ContractState,
+            sell_amount: u256,
+            bought_amount: u256,
+            price_sell: AssetPrice,
+            price_buy: AssetPrice,
+        ) {
+            assert!(price_sell.is_valid, "price-sell-invalid");
+            assert!(price_buy.is_valid, "price-buy-invalid");
+            assert!(price_sell.value != 0, "price-sell-zero");
+            assert!(price_buy.value != 0, "price-out-zero");
+            // TODO Assert price fairness
+        // assert(price out > (sell_amount * price * slippage) / (buy_price * scale))
+
         }
 
         fn transfer_asset(
@@ -350,14 +366,45 @@ pub mod ManagedVault {
         fn swap(ref self: ContractState, swap: Array<Swap>, limit_amount: u128) {
             self.assert_manager();
             assert!(limit_amount > 0, "invalid-limit-amount");
-            for local_swap in swap.span() {
-                for route_node in local_swap.route.span() {
-                    self.assert_asset_approved(*route_node.pool_key.token0);
-                    self.assert_asset_approved(*route_node.pool_key.token1);
-                }
-            }
+            let start_token = *swap[0].route[0].pool_key.token0;
+            let last_swap = swap[swap.len() - 1];
+            let end_token = *last_swap.route[last_swap.route.len() - 1].pool_key.token1;
+            self.assert_asset_approved(start_token);
+            self.assert_asset_approved(end_token);
+            let start_token_dispatcher = IERC20Dispatcher { contract_address: start_token };
+            let end_token_dispatcher = IERC20Dispatcher { contract_address: end_token };
+            let balance_in_before = start_token_dispatcher.balanceOf(get_contract_address());
+            let balance_out_before = end_token_dispatcher.balanceOf(get_contract_address());
+            // Do the swap
+            let x = call_core_with_callback(
+                self.ekubo_core.read(), @SwapParams { swap, limit_amount },
+            );
             // TODO Protect with an oracle enforced min slippage
-            call_core_with_callback(self.ekubo_core.read(), @SwapParams { swap, limit_amount })
+            let balance_in_after = start_token_dispatcher.balanceOf(get_contract_address());
+            let balance_out_after = end_token_dispatcher.balanceOf(get_contract_address());
+            // Decide which token is in/out based on the balance change
+            let (extension, pool_id) = self.price_source();
+            let extension = IExtensionDispatcher { contract_address: extension };
+            let is_negative = balance_in_after < balance_in_before;
+            let (sell_amount, buy_amount, price_sell, price_buy) = if is_negative {
+                (
+                    balance_in_before - balance_in_after,
+                    balance_out_after - balance_out_before,
+                    extension.price(pool_id, start_token),
+                    extension.price(pool_id, end_token),
+                )
+            } else {
+                (
+                    balance_out_before - balance_out_after,
+                    balance_in_after - balance_in_before,
+                    extension.price(pool_id, end_token),
+                    extension.price(pool_id, start_token),
+                )
+            };
+
+            self.assert_fair_rate(sell_amount, buy_amount, price_sell, price_buy);
+
+            x
         }
 
         fn modify_position(
@@ -479,7 +526,6 @@ pub mod ManagedVault {
             };
 
             let (extension, pool_id) = self.price_source();
-            // TODO Use pragma instead?
             let price = IExtensionDispatcher { contract_address: extension }
                 .price(pool_id, self.asset.read().contract_address);
             assets += balance * price.value / self.scale.read();
