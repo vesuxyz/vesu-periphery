@@ -234,6 +234,7 @@ pub mod ManagedVault {
             assert!(price_buy.value != 0, "price-out-zero");
             // TODO Assert price fairness
         // assert(price out > (sell_amount * price * slippage) / (buy_price * scale))
+        // Rounding has to be Ceil in this case
 
         }
 
