@@ -44,6 +44,8 @@ pub trait IManagedVault<TContractState> {
     fn modify_delegation(
         ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool,
     );
+    fn modify_pool_id_status(ref self: TContractState, pool_id: felt252, is_approved: bool);
+    fn is_pool_id_approved(self: @TContractState, pool_id: felt252) -> bool;
 
     // Management functions
     fn claim_rewards(
@@ -154,6 +156,9 @@ pub mod ManagedVault {
         // Map of redemption requests
         // (user, (timestamp, shares, nav_per_share_at_request))
         redemption_requests: Map<ContractAddress, (u64, u256, u256)>,
+        // Map pools accepted by the owner
+        // (pool_id, is_approved)
+        approved_pool_ids: Map<felt252, bool>,
         // storage for the timestamp manager component
         #[substorage(v0)]
         position_list: position_list_component::Storage,
@@ -211,6 +216,11 @@ pub mod ManagedVault {
         fn assert_owner(ref self: ContractState) {
             assert!(get_caller_address() == self.owner.read(), "caller-not-owner");
         }
+
+        fn assert_pool_id_approved(ref self: ContractState, pool_id: felt252) {
+            assert!(self.is_pool_id_approved(pool_id), "pool-not-accepted");
+        }
+
         fn transfer_asset(
             self: @ContractState, sender: ContractAddress, to: ContractAddress, amount: u256,
         ) {
@@ -313,6 +323,15 @@ pub mod ManagedVault {
             self.singleton.read().modify_delegation(pool_id, delegatee, delegation);
         }
 
+        fn modify_pool_id_status(ref self: ContractState, pool_id: felt252, is_approved: bool) {
+            self.assert_owner();
+            self.approved_pool_ids.write(pool_id, is_approved);
+        }
+
+        fn is_pool_id_approved(self: @ContractState, pool_id: felt252) -> bool {
+            self.approved_pool_ids.read(pool_id)
+        }
+
         fn claim_rewards(
             ref self: ContractState,
             rewards_contract: ContractAddress,
@@ -341,6 +360,8 @@ pub mod ManagedVault {
             debt: Amount,
         ) -> UpdatePositionResponse {
             self.assert_manager();
+            self.assert_pool_id_approved(pool_id);
+
             let singleton = self.singleton.read();
 
             let (position_before, _, _) = singleton
@@ -378,6 +399,7 @@ pub mod ManagedVault {
             ref self: ContractState, modify_lever_params: ModifyLeverParams,
         ) -> ModifyLeverResponse {
             self.assert_manager();
+
             let singleton = self.singleton.read();
 
             let (pool_id, collateral_asset, debt_asset, lever_swap_limit_amount) =
@@ -396,6 +418,7 @@ pub mod ManagedVault {
                 ),
             };
 
+            self.assert_pool_id_approved(pool_id);
             assert!(lever_swap_limit_amount > 0, "invalid-lever-swap-limit-amount");
 
             let (position_before, _, _) = singleton
