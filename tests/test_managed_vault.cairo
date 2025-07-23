@@ -120,11 +120,15 @@ mod Test_896150_ManagedVault {
         IStarkgateERC20Dispatcher { contract_address: usdt.contract_address }
             .permissioned_mint(user, 10010_000_000);
 
-        let test_config = TestConfig {
-            ekubo, singleton, multiply, managed_vault, pool_id, pool_key, eth, usdc, usdt, user,
-        };
+        cheat_caller_address(
+            managed_vault.contract_address, get_contract_address(), CheatSpan::TargetCalls(2),
+        );
+        managed_vault.modify_asset(usdc.contract_address, true);
+        managed_vault.modify_asset(eth.contract_address, true);
 
-        test_config
+        TestConfig {
+            ekubo, singleton, multiply, managed_vault, pool_id, pool_key, eth, usdc, usdt, user,
+        }
     }
 
     #[test]
