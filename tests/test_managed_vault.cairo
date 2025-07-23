@@ -1,4 +1,4 @@
-use starknet::{ContractAddress};
+use starknet::ContractAddress;
 
 #[starknet::interface]
 trait IStarkgateERC20<TContractState> {
@@ -7,35 +7,19 @@ trait IStarkgateERC20<TContractState> {
 
 #[cfg(test)]
 mod Test_896150_ManagedVault {
-    use snforge_std::{start_prank, stop_prank, start_warp, stop_warp, CheatTarget, load};
-    use starknet::{
-        ContractAddress, contract_address_const, get_block_timestamp, get_caller_address,
-        get_contract_address
-    };
-    use core::num::traits::{Zero};
-    use ekubo::{
-        interfaces::{
-            core::{ICoreDispatcher, ICoreDispatcherTrait, ILocker, SwapParameters},
-            erc20::{IERC20Dispatcher, IERC20DispatcherTrait}
-        },
-        types::{i129::{i129_new, i129Trait}, keys::{PoolKey},}
-    };
-    use vesu::{
-        units::{SCALE, SCALE_128},
-        data_model::{Amount, AmountType, AmountDenomination, ModifyPositionParams},
-        singleton::{ISingletonDispatcher, ISingletonDispatcherTrait}, test::setup::deploy_with_args,
-        common::{i257, i257_new},
-        extension::interface::{IExtensionDispatcher, IExtensionDispatcherTrait}
-    };
-    use vesu_periphery::{
-        multiply::{
-            IMultiplyDispatcher, IMultiplyDispatcherTrait, ModifyLeverParams, IncreaseLeverParams,
-            DecreaseLeverParams, ModifyLeverAction
-        },
-        swap::{RouteNode, TokenAmount, Swap},
-        managed_vault::{IManagedVaultDispatcher, IManagedVaultDispatcherTrait}
-    };
-
+    use alexandria_math::i257::I257Trait;
+    use ekubo::interfaces::core::ICoreDispatcher;
+    use ekubo::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use ekubo::types::keys::PoolKey;
+    use snforge_std::{CheatSpan, cheat_caller_address, load};
+    use starknet::{ContractAddress, get_contract_address};
+    use vesu::data_model::{Amount, AmountDenomination, AmountType};
+    use vesu::extension::interface::{IExtensionDispatcher, IExtensionDispatcherTrait};
+    use vesu::singleton_v2::{ISingletonV2Dispatcher, ISingletonV2DispatcherTrait};
+    use vesu::test::setup_v2::deploy_with_args;
+    use vesu::units::SCALE;
+    use vesu_periphery::managed_vault::{IManagedVaultDispatcher, IManagedVaultDispatcherTrait};
+    use vesu_periphery::multiply::IMultiplyDispatcher;
     use super::{IStarkgateERC20Dispatcher, IStarkgateERC20DispatcherTrait};
 
     const MIN_SQRT_RATIO_LIMIT: u256 = 18446748437148339061;
@@ -43,7 +27,7 @@ mod Test_896150_ManagedVault {
 
     struct TestConfig {
         ekubo: ICoreDispatcher,
-        singleton: ISingletonDispatcher,
+        singleton: ISingletonV2Dispatcher,
         multiply: IMultiplyDispatcher,
         managed_vault: IManagedVaultDispatcher,
         pool_id: felt252,
@@ -56,35 +40,36 @@ mod Test_896150_ManagedVault {
 
     fn setup() -> TestConfig {
         let ekubo = ICoreDispatcher {
-            contract_address: contract_address_const::<
-                0x00000005dd3D2F4429AF886cD1a3b08289DBcEa99A294197E9eB43b0e0325b4b
-            >()
+            contract_address: 0x00000005dd3D2F4429AF886cD1a3b08289DBcEa99A294197E9eB43b0e0325b4b
+                .try_into()
+                .unwrap(),
         };
-        let singleton = ISingletonDispatcher {
-            contract_address: contract_address_const::<
-                0x2545b2e5d519fc230e9cd781046d3a64e092114f07e44771e0d719d148725ef
-            >()
+        let singleton = ISingletonV2Dispatcher {
+            contract_address: 0x2545b2e5d519fc230e9cd781046d3a64e092114f07e44771e0d719d148725ef
+                .try_into()
+                .unwrap(),
         };
         let multiply = IMultiplyDispatcher {
             contract_address: deploy_with_args(
-                "Multiply", array![ekubo.contract_address.into(), singleton.contract_address.into()]
-            )
+                "Multiply",
+                array![ekubo.contract_address.into(), singleton.contract_address.into()],
+            ),
         };
 
         let eth = IERC20Dispatcher {
-            contract_address: contract_address_const::<
-                0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
-            >()
+            contract_address: 0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
+                .try_into()
+                .unwrap(),
         };
         let usdc = IERC20Dispatcher {
-            contract_address: contract_address_const::<
-                0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
-            >()
+            contract_address: 0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
+                .try_into()
+                .unwrap(),
         };
         let usdt = IERC20Dispatcher {
-            contract_address: contract_address_const::<
-                0x068f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8
-            >()
+            contract_address: 0x068f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8
+                .try_into()
+                .unwrap(),
         };
         // let strk = IERC20Dispatcher {
         //     contract_address: contract_address_const::<
@@ -99,7 +84,7 @@ mod Test_896150_ManagedVault {
             token1: usdc.contract_address,
             fee: 170141183460469235273462165868118016,
             tick_spacing: 1000,
-            extension: contract_address_const::<0x0>()
+            extension: 0x0.try_into().unwrap(),
         };
 
         let calldata: Array<felt252> = array![
@@ -109,14 +94,15 @@ mod Test_896150_ManagedVault {
             usdc.contract_address.into(),
             false.into(),
             get_contract_address().into(),
+            get_contract_address().into(),
             singleton.contract_address.into(),
             ekubo.contract_address.into(),
             multiply.contract_address.into(),
-            0
+            0,
         ];
 
         let managed_vault = IManagedVaultDispatcher {
-            contract_address: deploy_with_args("ManagedVault", calldata)
+            contract_address: deploy_with_args("ManagedVault", calldata),
         };
         managed_vault.set_price_source(singleton.extension(pool_id), pool_id);
 
@@ -124,20 +110,18 @@ mod Test_896150_ManagedVault {
 
         let loaded = load(usdc.contract_address, selector!("permitted_minter"), 1);
         let minter: ContractAddress = (*loaded[0]).try_into().unwrap();
-        start_prank(CheatTarget::One(usdc.contract_address), minter);
+        cheat_caller_address(usdc.contract_address, minter, CheatSpan::TargetCalls(1));
         IStarkgateERC20Dispatcher { contract_address: usdc.contract_address }
             .permissioned_mint(user, 10000_000_000);
-        stop_prank(CheatTarget::One(usdc.contract_address));
 
         let loaded = load(usdt.contract_address, selector!("permitted_minter"), 1);
         let minter: ContractAddress = (*loaded[0]).try_into().unwrap();
-        start_prank(CheatTarget::One(usdt.contract_address), minter);
+        cheat_caller_address(usdt.contract_address, minter, CheatSpan::TargetCalls(1));
         IStarkgateERC20Dispatcher { contract_address: usdt.contract_address }
             .permissioned_mint(user, 10010_000_000);
-        stop_prank(CheatTarget::One(usdt.contract_address));
 
         let test_config = TestConfig {
-            ekubo, singleton, multiply, managed_vault, pool_id, pool_key, eth, usdc, usdt, user
+            ekubo, singleton, multiply, managed_vault, pool_id, pool_key, eth, usdc, usdt, user,
         };
 
         test_config
@@ -147,16 +131,9 @@ mod Test_896150_ManagedVault {
     #[available_gas(20000000)]
     #[fork("Mainnet")]
     fn test_managed_vault_deposit() {
-        let TestConfig { singleton,
-        multiply,
-        managed_vault,
-        pool_id,
-        pool_key,
-        eth,
-        usdc,
-        user,
-        .. } =
-            setup();
+        let TestConfig {
+            singleton, multiply, managed_vault, pool_id, pool_key, eth, usdc, user, ..,
+        } = setup();
 
         let usdc_balance_before = usdc.balanceOf(user);
 
@@ -167,7 +144,7 @@ mod Test_896150_ManagedVault {
         assert!(
             IERC20Dispatcher { contract_address: managed_vault.contract_address }
                 .balanceOf(user) == 10000
-                * SCALE
+                * SCALE,
         );
 
         let (extension, pool_id) = managed_vault.price_source();
@@ -184,13 +161,13 @@ mod Test_896150_ManagedVault {
                 collateral: Amount {
                     amount_type: AmountType::Delta,
                     denomination: AmountDenomination::Assets,
-                    value: i257_new(10000_000_000, false)
+                    value: I257Trait::new(10000_000_000, false),
                 },
                 debt: Amount {
                     amount_type: AmountType::Delta,
                     denomination: AmountDenomination::Assets,
-                    value: i257_new(0, false)
-                }
+                    value: I257Trait::new(0, false),
+                },
             );
 
         assert!(managed_vault.nav() >= 10000 * price.value - 10000000000000);
@@ -203,13 +180,13 @@ mod Test_896150_ManagedVault {
                 collateral: Amount {
                     amount_type: AmountType::Target,
                     denomination: AmountDenomination::Assets,
-                    value: i257_new(0, false)
+                    value: I257Trait::new(0, false),
                 },
                 debt: Amount {
                     amount_type: AmountType::Delta,
                     denomination: AmountDenomination::Assets,
-                    value: i257_new(0, false)
-                }
+                    value: I257Trait::new(0, false),
+                },
             );
 
         assert!(managed_vault.nav() >= 10000 * price.value - 10000000000000);
@@ -217,15 +194,15 @@ mod Test_896150_ManagedVault {
         managed_vault
             .request_redeem(
                 IERC20Dispatcher { contract_address: managed_vault.contract_address }
-                    .balanceOf(user)
+                    .balanceOf(user),
             );
 
         managed_vault.redeem(user, user);
-    // assert!(managed_vault.nav() == 0.into());
+        // assert!(managed_vault.nav() == 0.into());
 
-    // singleton.modify_delegation(pool_id, multiply.contract_address, true);
+        // singleton.modify_delegation(pool_id, multiply.contract_address, true);
 
-    // let increase_lever_params = IncreaseLeverParams {
+        // let increase_lever_params = IncreaseLeverParams {
     //     pool_id,
     //     collateral_asset: usdc.contract_address,
     //     debt_asset: eth.contract_address,
@@ -249,20 +226,20 @@ mod Test_896150_ManagedVault {
     //     lever_swap_limit_amount: 44000000000000000, // 0.044 ETH
     // };
 
-    // let modify_lever_params = ModifyLeverParams {
+        // let modify_lever_params = ModifyLeverParams {
     //     action: ModifyLeverAction::IncreaseLever(increase_lever_params.clone())
     // };
 
-    // multiply.modify_lever(modify_lever_params);
+        // multiply.modify_lever(modify_lever_params);
 
-    // let (_, collateral, _) = singleton
+        // let (_, collateral, _) = singleton
     //     .position(pool_id, usdc.contract_address, eth.contract_address, user);
 
-    // let y: @Swap = (increase_lever_params.lever_swap[0]);
+        // let y: @Swap = (increase_lever_params.lever_swap[0]);
     // let x: u256 = (*y.token_amount.amount.mag).into();
     // assert!(collateral + 1 == increase_lever_params.add_margin.into() + x);
 
-    // assert!(
+        // assert!(
     //     usdc.balanceOf(user) == usdc_balance_before - increase_lever_params.add_margin.into()
     // );
     }

@@ -1,17 +1,18 @@
 [package]
 name = "vesu_periphery"
 version = "0.1.0"
-edition = "2023_11"
+edition = "2024_07"
 
 # See more keys and their definitions at https://docs.swmansion.com/scarb/docs/reference/manifest.html
 
 [dependencies]
-starknet = "2.6.3"
+starknet = "2.11.4"
 ekubo = { git = "https://github.com/EkuboProtocol/abis", commit = "946e1f3f97d48918d7cbd484de56bb2de8dd755e" }
-vesu = { git = "https://github.com/vesuxyz/vesu-v1", commit = "78cf26dd88c309a9d267e5968030e927a60cffcb" }
+vesu = { git = "https://github.com/vesuxyz/vesu-v1", branch = "feat/2.11.4" }
+alexandria_math = { git = "https://github.com/keep-starknet-strange/alexandria.git", rev = "c804e98" }
 
 [dev-dependencies]
-snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry", tag = "v0.21.0" }
+snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry", tag = "v0.46.0" }
 
 [[target.starknet-contract]]
 casm = true

@@ -1,4 +1,5 @@
-use starknet::{account::Call, ContractAddress};
+use starknet::ContractAddress;
+use starknet::account::Call;
 
 #[generate_trait]
 impl ArrayExt<T, +Drop<T>, +Copy<T>> of ArrayExtTrait<T> {
@@ -13,14 +14,14 @@ impl ArrayExt<T, +Drop<T>, +Copy<T>> of ArrayExtTrait<T> {
 pub trait IProxy<TContractState> {
     fn manager(self: @TContractState) -> ContractAddress;
     fn access_control(
-        self: @TContractState, caller: ContractAddress, contract: ContractAddress, method: felt252
+        self: @TContractState, caller: ContractAddress, contract: ContractAddress, method: felt252,
     ) -> bool;
     fn set_caller_for_method(
         ref self: TContractState,
         caller: ContractAddress,
         contract: ContractAddress,
         method: felt252,
-        can_call: bool
+        can_call: bool,
     );
     fn set_manager(ref self: TContractState, new_manager: ContractAddress);
     fn proxy_call(ref self: TContractState, calls: Span<Call>) -> Array<Span<felt252>>;
@@ -28,22 +29,25 @@ pub trait IProxy<TContractState> {
 
 #[starknet::contract]
 pub mod Proxy {
-    use starknet::{
-        account::Call, syscalls::call_contract_syscall, ContractAddress, get_caller_address
+    use starknet::account::Call;
+    use starknet::storage::{
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
     };
-    use vesu::singleton::{Singleton, ISingletonDispatcher, ISingletonDispatcherTrait};
+    use starknet::syscalls::call_contract_syscall;
+    use starknet::{ContractAddress, get_caller_address};
     use super::{ArrayExt, IProxy};
 
     #[storage]
     struct Storage {
         manager: ContractAddress,
-        access_control: LegacyMap<(ContractAddress, ContractAddress, felt252), bool>
+        access_control: Map<(ContractAddress, ContractAddress, felt252), bool>,
     }
 
     #[derive(Drop, starknet::Event)]
     struct SetManager {
         #[key]
-        manager: ContractAddress
+        manager: ContractAddress,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -54,14 +58,14 @@ pub mod Proxy {
         contract: ContractAddress,
         #[key]
         selector: felt252,
-        can_call: bool
+        can_call: bool,
     }
 
     #[event]
     #[derive(Drop, starknet::Event)]
     enum Event {
         SetManager: SetManager,
-        SetCallerForSelector: SetCallerForSelector
+        SetCallerForSelector: SetCallerForSelector,
     }
 
     #[constructor]
@@ -80,7 +84,7 @@ pub mod Proxy {
             self: @ContractState,
             caller: ContractAddress,
             contract: ContractAddress,
-            method: felt252
+            method: felt252,
         ) -> bool {
             self.access_control.read((caller, contract, method))
         }
@@ -90,15 +94,15 @@ pub mod Proxy {
             caller: ContractAddress,
             contract: ContractAddress,
             method: felt252,
-            can_call: bool
+            can_call: bool,
         ) {
             assert!(get_caller_address() == self.manager.read(), "caller-not-manager");
             self.access_control.write((caller, contract, method), can_call);
             self
                 .emit(
                     SetCallerForSelector {
-                        caller: caller, contract: contract, selector: method, can_call: can_call
-                    }
+                        caller: caller, contract: contract, selector: method, can_call: can_call,
+                    },
                 );
         }
 
@@ -111,28 +115,27 @@ pub mod Proxy {
         fn proxy_call(ref self: ContractState, mut calls: Span<Call>) -> Array<Span<felt252>> {
             let mut result = array![];
             let mut index = 0;
-            while let Option::Some(call) = calls
-                .pop_front() {
-                    assert!(
-                        get_caller_address() == self.manager.read()
-                            || self
-                                .access_control
-                                .read((get_caller_address(), *call.to, *call.selector)),
-                        "caller-not-authorized"
-                    );
+            while let Option::Some(call) = calls.pop_front() {
+                assert!(
+                    get_caller_address() == self.manager.read()
+                        || self
+                            .access_control
+                            .read((get_caller_address(), *call.to, *call.selector)),
+                    "caller-not-authorized",
+                );
 
-                    match call_contract_syscall(*call.to, *call.selector, *call.calldata) {
-                        Result::Ok(return_data) => {
-                            result.append(return_data);
-                            index += 1;
-                        },
-                        Result::Err(revert_reason) => {
-                            let mut data = array!['proxy-call-failed', index];
-                            data.append_all(revert_reason.span());
-                            panic(data);
-                        },
-                    }
-                };
+                match call_contract_syscall(*call.to, *call.selector, *call.calldata) {
+                    Result::Ok(return_data) => {
+                        result.append(return_data);
+                        index += 1;
+                    },
+                    Result::Err(revert_reason) => {
+                        let mut data = array!['proxy-call-failed', index];
+                        data.append_all(revert_reason.span());
+                        panic(data);
+                    },
+                }
+            }
             result
         }
     }

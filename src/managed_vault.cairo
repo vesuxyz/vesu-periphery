@@ -1,11 +1,7 @@
-use starknet::{account::Call, ContractAddress};
-use vesu::{common::{i257, i257_new}, data_model::{Amount, UpdatePositionResponse}};
-use vesu_periphery::{
-    swap::Swap,
-    multiply::{
-        IMultiplyDispatcher, IMultiplyDispatcherTrait, ModifyLeverParams, ModifyLeverResponse
-    }
-};
+use starknet::ContractAddress;
+use vesu::data_model::{Amount, UpdatePositionResponse};
+use vesu_periphery::multiply::{ModifyLeverParams, ModifyLeverResponse};
+use vesu_periphery::swap::Swap;
 
 #[starknet::interface]
 trait IERC4626<TContractState> {
@@ -22,12 +18,12 @@ trait IERC4626<TContractState> {
     fn max_withdraw(self: @TContractState, owner: ContractAddress) -> u256;
     fn preview_withdraw(self: @TContractState, assets: u256) -> u256;
     fn withdraw(
-        ref self: TContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress
+        ref self: TContractState, assets: u256, receiver: ContractAddress, owner: ContractAddress,
     ) -> u256;
     fn max_redeem(self: @TContractState, owner: ContractAddress) -> u256;
     fn preview_redeem(self: @TContractState, shares: u256) -> u256;
     fn redeem(
-        ref self: TContractState, shares: u256, receiver: ContractAddress, owner: ContractAddress
+        ref self: TContractState, shares: u256, receiver: ContractAddress, owner: ContractAddress,
     ) -> u256;
 }
 
@@ -40,19 +36,22 @@ pub struct Claim {
 
 #[starknet::interface]
 pub trait IManagedVault<TContractState> {
+    // Owner functions
     fn set_manager(ref self: TContractState, manager: ContractAddress);
     fn set_price_source(ref self: TContractState, extension: ContractAddress, pool_id: felt252);
     fn price_source(self: @TContractState) -> (ContractAddress, felt252);
-    fn modify_delegation(
-        ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool
-    );
     fn set_redemption_timeout(ref self: TContractState, timeout: u64);
+    fn modify_delegation(
+        ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool,
+    );
     fn approve_singleton(ref self: TContractState);
+
+    // Management functions
     fn claim_rewards(
         ref self: TContractState,
         rewards_contract: ContractAddress,
         claim: Claim,
-        proof: Span<felt252>
+        proof: Span<felt252>,
     );
     fn swap(ref self: TContractState, swap: Array<Swap>, limit_amount: u128);
     fn modify_position(
@@ -61,13 +60,14 @@ pub trait IManagedVault<TContractState> {
         collateral_asset: ContractAddress,
         debt_asset: ContractAddress,
         collateral: Amount,
-        debt: Amount
+        debt: Amount,
     ) -> UpdatePositionResponse;
     fn modify_lever(
-        ref self: TContractState, modify_lever_params: ModifyLeverParams
+        ref self: TContractState, modify_lever_params: ModifyLeverParams,
     ) -> ModifyLeverResponse;
     fn nav(self: @TContractState) -> u256;
 
+    // User related functions
     fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
     fn mint(ref self: TContractState, shares: u256, receiver: ContractAddress) -> u256;
 
@@ -83,50 +83,40 @@ pub trait IMerkleDistributor<TContractState> {
 #[derive(Serde, Drop, Clone)]
 pub struct SwapParams {
     pub swap: Array<Swap>,
-    pub limit_amount: u128
+    pub limit_amount: u128,
 }
 
 #[starknet::contract]
 pub mod ManagedVault {
-    use core::integer::BoundedInt;
-    use core::num::traits::{Zero};
-
-    use starknet::{
-        account::Call, syscalls::call_contract_syscall, ContractAddress, get_caller_address,
-        get_contract_address, get_block_timestamp
+    use core::num::traits::{Bounded, Zero};
+    use ekubo::components::shared_locker::{
+        call_core_with_callback, consume_callback_data, handle_delta,
     };
-    use ekubo::{
-        components::{shared_locker::{consume_callback_data, handle_delta, call_core_with_callback}},
-        interfaces::core::{ICoreDispatcher, ICoreDispatcherTrait, ILocker, SwapParameters}
+    use ekubo::interfaces::core::{ICoreDispatcher, ILocker};
+    use starknet::storage::{
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
     };
-    use vesu::{
-        data_model::{
-            ModifyPositionParams, Amount, AmountType, AmountDenomination, AssetConfig,
-            UpdatePositionResponse
-        },
-        units::SCALE, singleton::{Singleton, ISingletonDispatcher, ISingletonDispatcherTrait},
-        v_token::{IVToken, IVTokenDispatcher, IVTokenDispatcherTrait},
-        vendor::{
-            erc20::{ERC20ABIDispatcher as IERC20Dispatcher, ERC20ABIDispatcherTrait},
-            erc20_component::ERC20Component
-        },
-        common::{i257, i257_new, calculate_collateral_and_debt_value}, math::pow_10,
-        extension::interface::{IExtensionDispatcher, IExtensionDispatcherTrait}
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
+    use vesu::common::calculate_collateral_and_debt_value;
+    use vesu::data_model::{Amount, ModifyPositionParams, UpdatePositionResponse};
+    use vesu::extension::interface::{IExtensionDispatcher, IExtensionDispatcherTrait};
+    use vesu::math::pow_10;
+    use vesu::singleton_v2::{ISingletonV2Dispatcher, ISingletonV2DispatcherTrait};
+    use vesu::units::SCALE;
+    use vesu::vendor::erc20::{ERC20ABIDispatcher as IERC20Dispatcher, ERC20ABIDispatcherTrait};
+    use vesu::vendor::erc20_component::ERC20Component;
+    use vesu_periphery::managed_vault::{
+        Claim, IManagedVault, IMerkleDistributorDispatcher, IMerkleDistributorDispatcherTrait,
+        SwapParams,
     };
-    use vesu_periphery::{
-        swap::{swap, Swap},
-        managed_vault::{
-            IManagedVault, Claim, IMerkleDistributorDispatcher, IMerkleDistributorDispatcherTrait,
-            SwapParams
-        },
-        multiply::{
-            IMultiplyDispatcher, IMultiplyDispatcherTrait, ModifyLeverParams, ModifyLeverResponse,
-            ModifyLeverAction
-        },
-        utils::position_list::{
-            position_list_component, position_list_component::PositionListTrait, Position
-        },
+    use vesu_periphery::multiply::{
+        IMultiplyDispatcher, IMultiplyDispatcherTrait, ModifyLeverAction, ModifyLeverParams,
+        ModifyLeverResponse,
     };
+    use vesu_periphery::swap::{Swap, swap};
+    use vesu_periphery::utils::position_list::position_list_component::PositionListTrait;
+    use vesu_periphery::utils::position_list::{Position, position_list_component};
 
     component!(path: position_list_component, storage: position_list, event: PositionListEvent);
     component!(path: ERC20Component, storage: erc20, event: ERC20Event);
@@ -150,10 +140,12 @@ pub mod ManagedVault {
         // The price source extension address
         // (extension, pool_id)
         price_source: (ContractAddress, felt252),
+        // The vault owner address
+        owner: ContractAddress,
         // The vault manager address
         manager: ContractAddress,
         // The Vesu singleton contract address
-        singleton: ISingletonDispatcher,
+        singleton: ISingletonV2Dispatcher,
         // The Ekubo core contract address
         ekubo_core: ICoreDispatcher,
         // The Multiply contract address
@@ -162,7 +154,7 @@ pub mod ManagedVault {
         redemption_timeout: u64,
         // Map of redemption requests
         // (user, (timestamp, shares, nav_per_share_at_request))
-        redemption_requests: LegacyMap::<ContractAddress, (u64, u256, u256)>,
+        redemption_requests: Map<ContractAddress, (u64, u256, u256)>,
         // storage for the timestamp manager component
         #[substorage(v0)]
         position_list: position_list_component::Storage,
@@ -187,22 +179,24 @@ pub mod ManagedVault {
         decimals: u8,
         asset: ContractAddress,
         is_legacy: bool,
+        owner: ContractAddress,
         manager: ContractAddress,
         singleton: ContractAddress,
         ekubo_core: ContractAddress,
         multiply: ContractAddress,
-        redemption_timeout: u64
+        redemption_timeout: u64,
     ) {
         self.erc20.initializer(name, symbol, decimals);
 
         self.asset.write(IERC20Dispatcher { contract_address: asset });
         self.scale.write(pow_10(IERC20Dispatcher { contract_address: asset }.decimals().into()));
-        IERC20Dispatcher { contract_address: asset }.approve(singleton, BoundedInt::max());
+        IERC20Dispatcher { contract_address: asset }.approve(singleton, Bounded::MAX);
         self.is_legacy.write(is_legacy);
 
+        self.owner.write(owner);
         self.manager.write(manager);
 
-        self.singleton.write(ISingletonDispatcher { contract_address: singleton });
+        self.singleton.write(ISingletonV2Dispatcher { contract_address: singleton });
         self.ekubo_core.write(ICoreDispatcher { contract_address: ekubo_core });
         self.multiply.write(IMultiplyDispatcher { contract_address: multiply });
 
@@ -215,8 +209,11 @@ pub mod ManagedVault {
             assert!(get_caller_address() == self.manager.read(), "caller-not-manager");
         }
 
+        fn assert_owner(ref self: ContractState) {
+            assert!(get_caller_address() == self.owner.read(), "caller-not-owner");
+        }
         fn transfer_asset(
-            self: @ContractState, sender: ContractAddress, to: ContractAddress, amount: u256
+            self: @ContractState, sender: ContractAddress, to: ContractAddress, amount: u256,
         ) {
             let asset = self.asset.read();
             let is_legacy = self.is_legacy.read();
@@ -242,7 +239,7 @@ pub mod ManagedVault {
             collateral_asset: ContractAddress,
             debt_asset: ContractAddress,
             collateral_shares_before: u256,
-            collateral_shares_after: u256
+            collateral_shares_after: u256,
         ) {
             if collateral_shares_before == 0 && collateral_shares_after > 0 {
                 self.position_list.push_front(Position { pool_id, collateral_asset, debt_asset });
@@ -260,14 +257,14 @@ pub mod ManagedVault {
         }
 
         fn convert_to_assets(
-            self: @ContractState, total_supply: u256, nav: u256, shares_delta: u256
+            self: @ContractState, total_supply: u256, nav: u256, shares_delta: u256,
         ) -> u256 {
             let index = self.compute_index(total_supply, nav);
             (shares_delta * index / SCALE) * self.scale.read() / SCALE
         }
 
         fn convert_to_shares(
-            self: @ContractState, total_supply: u256, nav: u256, assets_delta: u256
+            self: @ContractState, total_supply: u256, nav: u256, assets_delta: u256,
         ) -> u256 {
             let index = self.compute_index(total_supply, nav);
             (assets_delta * SCALE / self.scale.read()) * SCALE / index
@@ -292,12 +289,12 @@ pub mod ManagedVault {
     #[abi(embed_v0)]
     impl ManagedVaultImpl of IManagedVault<ContractState> {
         fn set_manager(ref self: ContractState, manager: ContractAddress) {
-            self.assert_manager();
+            self.assert_owner();
             self.manager.write(manager);
         }
 
         fn set_price_source(ref self: ContractState, extension: ContractAddress, pool_id: felt252) {
-            self.assert_manager();
+            self.assert_owner();
             self.price_source.write((extension, pool_id));
         }
 
@@ -307,18 +304,19 @@ pub mod ManagedVault {
 
         /// Re-approves the vToken to be spendable by the extension
         fn approve_singleton(ref self: ContractState) {
-            self.asset.read().approve(self.singleton.read().contract_address, BoundedInt::max());
+            self.assert_owner();
+            self.asset.read().approve(self.singleton.read().contract_address, Bounded::MAX);
         }
 
         fn set_redemption_timeout(ref self: ContractState, timeout: u64) {
-            self.assert_manager();
+            self.assert_owner();
             self.redemption_timeout.write(timeout);
         }
 
         fn modify_delegation(
-            ref self: ContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool
+            ref self: ContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool,
         ) {
-            self.assert_manager();
+            self.assert_owner();
             self.singleton.read().modify_delegation(pool_id, delegatee, delegation);
         }
 
@@ -329,6 +327,7 @@ pub mod ManagedVault {
             proof: Span<felt252>,
         ) {
             self.assert_manager();
+            // TODO What if the interface changes?
             IMerkleDistributorDispatcher { contract_address: rewards_contract }
                 .claim(claim.amount, proof);
         }
@@ -336,6 +335,7 @@ pub mod ManagedVault {
         fn swap(ref self: ContractState, swap: Array<Swap>, limit_amount: u128) {
             self.assert_manager();
             assert!(limit_amount > 0, "invalid-limit-amount");
+            // TODO Protect with an oracle enforced min slippage
             call_core_with_callback(self.ekubo_core.read(), @SwapParams { swap, limit_amount })
         }
 
@@ -345,7 +345,7 @@ pub mod ManagedVault {
             collateral_asset: ContractAddress,
             debt_asset: ContractAddress,
             collateral: Amount,
-            debt: Amount
+            debt: Amount,
         ) -> UpdatePositionResponse {
             self.assert_manager();
             let singleton = self.singleton.read();
@@ -362,8 +362,8 @@ pub mod ManagedVault {
                         user: get_contract_address(),
                         collateral: collateral,
                         debt: debt,
-                        data: array![].span()
-                    }
+                        data: array![].span(),
+                    },
                 );
 
             let (position_after, _, _) = singleton
@@ -375,14 +375,14 @@ pub mod ManagedVault {
                     collateral_asset,
                     debt_asset,
                     position_before.collateral_shares,
-                    position_after.collateral_shares
+                    position_after.collateral_shares,
                 );
 
             response
         }
 
         fn modify_lever(
-            ref self: ContractState, modify_lever_params: ModifyLeverParams
+            ref self: ContractState, modify_lever_params: ModifyLeverParams,
         ) -> ModifyLeverResponse {
             self.assert_manager();
             let singleton = self.singleton.read();
@@ -393,14 +393,14 @@ pub mod ManagedVault {
                     params.pool_id,
                     params.collateral_asset,
                     params.debt_asset,
-                    params.lever_swap_limit_amount
+                    params.lever_swap_limit_amount,
                 ),
                 ModifyLeverAction::DecreaseLever(params) => (
                     params.pool_id,
                     params.collateral_asset,
                     params.debt_asset,
-                    params.lever_swap_limit_amount
-                )
+                    params.lever_swap_limit_amount,
+                ),
             };
 
             assert!(lever_swap_limit_amount > 0, "invalid-lever-swap-limit-amount");
@@ -420,7 +420,7 @@ pub mod ManagedVault {
                     collateral_asset,
                     debt_asset,
                     position_before.collateral_shares,
-                    position_after.collateral_shares
+                    position_after.collateral_shares,
                 );
 
             response
@@ -438,12 +438,12 @@ pub mod ManagedVault {
                 let context = singleton
                     .context(pool_id, collateral_asset, debt_asset, get_contract_address());
                 let (_, collateral_value, _, debt_value) = calculate_collateral_and_debt_value(
-                    context, context.position
+                    context, context.position,
                 );
                 assets += collateral_value;
                 liabilities += debt_value;
                 position = self.position_list.next(position);
-            };
+            }
 
             let balance = if self.is_legacy.read() {
                 self.asset.read().balanceOf(get_contract_address())
@@ -480,7 +480,7 @@ pub mod ManagedVault {
         }
 
         fn redeem(
-            ref self: ContractState, receiver: ContractAddress, owner: ContractAddress
+            ref self: ContractState, receiver: ContractAddress, owner: ContractAddress,
         ) -> u256 {
             let (timestamp, shares, nav_per_share_at_request) = self
                 .redemption_requests
@@ -488,7 +488,7 @@ pub mod ManagedVault {
 
             assert!(
                 timestamp + self.redemption_timeout.read() >= get_block_timestamp(),
-                "redeem-timeout"
+                "redeem-timeout",
             );
 
             let mut per_share_nav = self.compute_index(self.erc20.total_supply(), self.nav());

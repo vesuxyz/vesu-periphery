@@ -1,41 +1,24 @@
-use starknet::ContractAddress;
-
 #[cfg(test)]
 mod Test_Proxy {
-    use snforge_std::{start_prank, stop_prank, start_warp, stop_warp, CheatTarget, load};
-    use starknet::{
-        ContractAddress, contract_address_const, get_block_timestamp, get_caller_address,
-        get_contract_address, account::Call
+    use ekubo::interfaces::erc20::IERC20Dispatcher;
+    use snforge_std::{CheatSpan, cheat_caller_address};
+    use starknet::account::Call;
+    use starknet::{ContractAddress, get_caller_address};
+    use vesu::data_model::LTVConfig;
+    use vesu::extension::components::position_hooks::ShutdownMode;
+    use vesu::extension::default_extension_po_v2::{
+        IDefaultExtensionPOV2Dispatcher, IDefaultExtensionPOV2DispatcherTrait,
     };
-    use core::num::traits::{Zero};
-    use ekubo::{
-        interfaces::{
-            core::{ICoreDispatcher, ICoreDispatcherTrait, ILocker, SwapParameters},
-            erc20::{IERC20Dispatcher, IERC20DispatcherTrait}
-        },
-        types::{i129::{i129_new, i129Trait}, keys::{PoolKey},}
-    };
-    use vesu::{
-        units::{SCALE, SCALE_128},
-        data_model::{Amount, AmountType, AmountDenomination, ModifyPositionParams, LTVConfig},
-        singleton::{ISingletonDispatcher, ISingletonDispatcherTrait}, test::setup::deploy_with_args,
-        common::{i257, i257_new},
-        extension::default_extension_po::{
-            IDefaultExtensionDispatcher, IDefaultExtensionDispatcherTrait, ShutdownMode
-        }
-    };
-    use vesu_periphery::multiply4626::{
-        IMultiply4626Dispatcher, IMultiply4626DispatcherTrait, ModifyLeverParams,
-        IncreaseLeverParams, ModifyLeverAction, I4626Dispatcher, I4626DispatcherTrait
-    };
-    use vesu_periphery::swap::{RouteNode, TokenAmount, Swap};
+    use vesu::singleton_v2::{ISingletonV2Dispatcher, ISingletonV2DispatcherTrait};
+    use vesu::test::setup_v2::deploy_with_args;
+    use vesu::units::SCALE;
     use vesu_periphery::proxy::{IProxyDispatcher, IProxyDispatcherTrait};
 
     struct TestConfig {
         eth: IERC20Dispatcher,
         usdc: IERC20Dispatcher,
-        singleton: ISingletonDispatcher,
-        extension: IDefaultExtensionDispatcher,
+        singleton: ISingletonV2Dispatcher,
+        extension: IDefaultExtensionPOV2Dispatcher,
         pool_id: felt252,
         manager: ContractAddress,
         pauser: ContractAddress,
@@ -44,40 +27,39 @@ mod Test_Proxy {
 
     fn setup() -> TestConfig {
         let eth = IERC20Dispatcher {
-            contract_address: contract_address_const::<
-                0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
-            >()
+            contract_address: 0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
+                .try_into()
+                .unwrap(),
         };
         let usdc = IERC20Dispatcher {
-            contract_address: contract_address_const::<
-                0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
-            >()
+            contract_address: 0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
+                .try_into()
+                .unwrap(),
         };
 
-        let singleton = ISingletonDispatcher {
-            contract_address: contract_address_const::<
-                0x2545b2e5d519fc230e9cd781046d3a64e092114f07e44771e0d719d148725ef
-            >()
+        let singleton = ISingletonV2Dispatcher {
+            contract_address: 0x2545b2e5d519fc230e9cd781046d3a64e092114f07e44771e0d719d148725ef
+                .try_into()
+                .unwrap(),
         };
 
         let pool_id = 2198503327643286920898110335698706244522220458610657370981979460625005526824;
 
-        let extension = IDefaultExtensionDispatcher {
-            contract_address: singleton.extension(pool_id)
+        let extension = IDefaultExtensionPOV2Dispatcher {
+            contract_address: singleton.extension(pool_id),
         };
 
         let manager = extension.pool_owner(pool_id);
-        let pauser = contract_address_const::<'0x1'>();
+        let pauser = '0x1'.try_into().unwrap();
 
         let proxy = IProxyDispatcher {
-            contract_address: deploy_with_args("Proxy", array![manager.into()])
+            contract_address: deploy_with_args("Proxy", array![manager.into()]),
         };
 
-        start_prank(CheatTarget::One(extension.contract_address), manager);
+        cheat_caller_address(extension.contract_address, manager, CheatSpan::TargetCalls(1));
         extension.set_pool_owner(pool_id, proxy.contract_address);
-        stop_prank(CheatTarget::One(extension.contract_address));
 
-        TestConfig { eth, usdc, singleton, extension, pool_id, manager, pauser, proxy, }
+        TestConfig { eth, usdc, singleton, extension, pool_id, manager, pauser, proxy }
     }
 
     #[test]
@@ -100,9 +82,8 @@ mod Test_Proxy {
 
         assert!(proxy.manager() != get_caller_address());
 
-        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        cheat_caller_address(proxy.contract_address, manager, CheatSpan::TargetCalls(1));
         proxy.set_manager(get_caller_address());
-        stop_prank(CheatTarget::One(proxy.contract_address));
 
         assert!(proxy.manager() == get_caller_address());
     }
@@ -117,7 +98,7 @@ mod Test_Proxy {
 
         proxy
             .set_caller_for_method(
-                pauser, extension.contract_address, selector!("singleton"), true
+                pauser, extension.contract_address, selector!("singleton"), true,
             );
     }
 
@@ -130,35 +111,32 @@ mod Test_Proxy {
 
         assert!(!proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
 
-        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        cheat_caller_address(proxy.contract_address, manager, CheatSpan::TargetCalls(1));
         proxy
             .set_caller_for_method(
-                pauser, extension.contract_address, selector!("singleton"), true
+                pauser, extension.contract_address, selector!("singleton"), true,
             );
-        stop_prank(CheatTarget::One(proxy.contract_address));
 
         assert!(proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
 
-        start_prank(CheatTarget::One(proxy.contract_address), pauser);
+        cheat_caller_address(proxy.contract_address, pauser, CheatSpan::TargetCalls(1));
         proxy
             .proxy_call(
                 array![
                     Call {
                         to: extension.contract_address,
                         selector: selector!("singleton"),
-                        calldata: array![].span()
-                    }
+                        calldata: array![].span(),
+                    },
                 ]
-                    .span()
+                    .span(),
             );
-        stop_prank(CheatTarget::One(proxy.contract_address));
 
-        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        cheat_caller_address(proxy.contract_address, manager, CheatSpan::TargetCalls(1));
         proxy
             .set_caller_for_method(
-                pauser, extension.contract_address, selector!("singleton"), false
+                pauser, extension.contract_address, selector!("singleton"), false,
             );
-        stop_prank(CheatTarget::One(proxy.contract_address));
     }
 
     #[test]
@@ -171,39 +149,36 @@ mod Test_Proxy {
 
         assert!(!proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
 
-        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        cheat_caller_address(proxy.contract_address, manager, CheatSpan::TargetCalls(1));
         proxy
             .set_caller_for_method(
-                pauser, extension.contract_address, selector!("singleton"), true
+                pauser, extension.contract_address, selector!("singleton"), true,
             );
-        stop_prank(CheatTarget::One(proxy.contract_address));
 
         assert!(proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
 
-        start_prank(CheatTarget::One(proxy.contract_address), pauser);
+        cheat_caller_address(proxy.contract_address, pauser, CheatSpan::TargetCalls(1));
         proxy
             .proxy_call(
                 array![
                     Call {
                         to: extension.contract_address,
                         selector: selector!("singleton"),
-                        calldata: array![].span()
-                    }
+                        calldata: array![].span(),
+                    },
                 ]
-                    .span()
+                    .span(),
             );
-        stop_prank(CheatTarget::One(proxy.contract_address));
 
-        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        cheat_caller_address(proxy.contract_address, manager, CheatSpan::TargetCalls(1));
         proxy
             .set_caller_for_method(
-                pauser, extension.contract_address, selector!("singleton"), false
+                pauser, extension.contract_address, selector!("singleton"), false,
             );
-        stop_prank(CheatTarget::One(proxy.contract_address));
 
         assert!(!proxy.access_control(pauser, extension.contract_address, selector!("singleton")));
 
-        start_prank(CheatTarget::One(proxy.contract_address), pauser);
+        cheat_caller_address(proxy.contract_address, pauser, CheatSpan::TargetCalls(1));
 
         proxy
             .proxy_call(
@@ -211,10 +186,10 @@ mod Test_Proxy {
                     Call {
                         to: extension.contract_address,
                         selector: selector!("singleton"),
-                        calldata: array![].span()
-                    }
+                        calldata: array![].span(),
+                    },
                 ]
-                    .span()
+                    .span(),
             );
     }
 
@@ -225,7 +200,7 @@ mod Test_Proxy {
         let config = setup();
         let TestConfig { eth, usdc, extension, pool_id, manager, proxy, .. } = config;
 
-        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        cheat_caller_address(proxy.contract_address, manager, CheatSpan::TargetCalls(1));
 
         let mut ltv_config_serialized = array![];
         LTVConfig { max_ltv: 0 }.serialize(ref ltv_config_serialized);
@@ -234,11 +209,10 @@ mod Test_Proxy {
             pool_id, usdc.contract_address.into(), eth.contract_address.into(),
         ];
 
-        while !ltv_config_serialized
-            .is_empty() {
-                let item = ltv_config_serialized.pop_front().unwrap();
-                calldata.append(item);
-            };
+        while !ltv_config_serialized.is_empty() {
+            let item = ltv_config_serialized.pop_front().unwrap();
+            calldata.append(item);
+        }
 
         proxy
             .proxy_call(
@@ -246,19 +220,17 @@ mod Test_Proxy {
                     Call {
                         to: extension.contract_address,
                         selector: selector!("set_shutdown_ltv_config"),
-                        calldata: calldata.span()
-                    }
+                        calldata: calldata.span(),
+                    },
                 ]
-                    .span()
+                    .span(),
             );
-
-        stop_prank(CheatTarget::One(proxy.contract_address));
 
         let shutdown_mode = extension
             .update_shutdown_status(pool_id, usdc.contract_address, eth.contract_address);
         assert!(shutdown_mode == ShutdownMode::Recovery);
 
-        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        cheat_caller_address(proxy.contract_address, manager, CheatSpan::TargetCalls(1));
 
         let mut ltv_config_serialized = array![];
         LTVConfig { max_ltv: SCALE.try_into().unwrap() }.serialize(ref ltv_config_serialized);
@@ -267,11 +239,10 @@ mod Test_Proxy {
             pool_id, usdc.contract_address.into(), eth.contract_address.into(),
         ];
 
-        while !ltv_config_serialized
-            .is_empty() {
-                let item = ltv_config_serialized.pop_front().unwrap();
-                calldata.append(item);
-            };
+        while !ltv_config_serialized.is_empty() {
+            let item = ltv_config_serialized.pop_front().unwrap();
+            calldata.append(item);
+        }
 
         proxy
             .proxy_call(
@@ -279,13 +250,11 @@ mod Test_Proxy {
                     Call {
                         to: extension.contract_address,
                         selector: selector!("set_shutdown_ltv_config"),
-                        calldata: calldata.span()
-                    }
+                        calldata: calldata.span(),
+                    },
                 ]
-                    .span()
+                    .span(),
             );
-
-        stop_prank(CheatTarget::One(proxy.contract_address));
 
         let shutdown_mode = extension
             .update_shutdown_status(pool_id, usdc.contract_address, eth.contract_address);
@@ -300,7 +269,7 @@ mod Test_Proxy {
         let config = setup();
         let TestConfig { eth, usdc, extension, pool_id, pauser, proxy, .. } = config;
 
-        start_prank(CheatTarget::One(proxy.contract_address), pauser);
+        cheat_caller_address(proxy.contract_address, pauser, CheatSpan::TargetCalls(1));
 
         let mut ltv_config_serialized = array![];
         LTVConfig { max_ltv: 0 }.serialize(ref ltv_config_serialized);
@@ -309,11 +278,10 @@ mod Test_Proxy {
             pool_id, usdc.contract_address.into(), eth.contract_address.into(),
         ];
 
-        while !ltv_config_serialized
-            .is_empty() {
-                let item = ltv_config_serialized.pop_front().unwrap();
-                calldata.append(item);
-            };
+        while !ltv_config_serialized.is_empty() {
+            let item = ltv_config_serialized.pop_front().unwrap();
+            calldata.append(item);
+        }
 
         proxy
             .proxy_call(
@@ -321,13 +289,11 @@ mod Test_Proxy {
                     Call {
                         to: extension.contract_address,
                         selector: selector!("set_shutdown_ltv_config"),
-                        calldata: calldata.span()
-                    }
+                        calldata: calldata.span(),
+                    },
                 ]
-                    .span()
+                    .span(),
             );
-
-        stop_prank(CheatTarget::One(proxy.contract_address));
     }
 
     #[test]
@@ -337,14 +303,13 @@ mod Test_Proxy {
         let config = setup();
         let TestConfig { eth, usdc, extension, pool_id, manager, pauser, proxy, .. } = config;
 
-        start_prank(CheatTarget::One(proxy.contract_address), manager);
+        cheat_caller_address(proxy.contract_address, manager, CheatSpan::TargetCalls(1));
         proxy
             .set_caller_for_method(
-                pauser, extension.contract_address, selector!("set_shutdown_ltv_config"), true
+                pauser, extension.contract_address, selector!("set_shutdown_ltv_config"), true,
             );
-        stop_prank(CheatTarget::One(proxy.contract_address));
 
-        start_prank(CheatTarget::One(proxy.contract_address), pauser);
+        cheat_caller_address(proxy.contract_address, pauser, CheatSpan::TargetCalls(1));
 
         let mut ltv_config_serialized = array![];
         LTVConfig { max_ltv: 0 }.serialize(ref ltv_config_serialized);
@@ -353,11 +318,10 @@ mod Test_Proxy {
             pool_id, usdc.contract_address.into(), eth.contract_address.into(),
         ];
 
-        while !ltv_config_serialized
-            .is_empty() {
-                let item = ltv_config_serialized.pop_front().unwrap();
-                calldata.append(item);
-            };
+        while !ltv_config_serialized.is_empty() {
+            let item = ltv_config_serialized.pop_front().unwrap();
+            calldata.append(item);
+        }
 
         proxy
             .proxy_call(
@@ -365,13 +329,11 @@ mod Test_Proxy {
                     Call {
                         to: extension.contract_address,
                         selector: selector!("set_shutdown_ltv_config"),
-                        calldata: calldata.span()
-                    }
+                        calldata: calldata.span(),
+                    },
                 ]
-                    .span()
+                    .span(),
             );
-
-        stop_prank(CheatTarget::One(proxy.contract_address));
 
         let shutdown_mode = extension
             .update_shutdown_status(pool_id, usdc.contract_address, eth.contract_address);

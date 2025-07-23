@@ -2,52 +2,32 @@
 version = 1
 
 [[package]]
-name = "alexandria_data_structures"
-version = "0.2.0"
-source = "git+https://github.com/keep-starknet-strange/alexandria.git?rev=e7b6957#e7b69575f92076e96a83a76efa6bed3c32a15f9f"
-dependencies = [
- "alexandria_encoding",
-]
-
-[[package]]
-name = "alexandria_encoding"
-version = "0.1.0"
-source = "git+https://github.com/keep-starknet-strange/alexandria.git?rev=e7b6957#e7b69575f92076e96a83a76efa6bed3c32a15f9f"
-dependencies = [
- "alexandria_math",
- "alexandria_numeric",
-]
-
-[[package]]
 name = "alexandria_math"
-version = "0.2.0"
-source = "git+https://github.com/keep-starknet-strange/alexandria.git?rev=e7b6957#e7b69575f92076e96a83a76efa6bed3c32a15f9f"
-dependencies = [
- "alexandria_data_structures",
-]
-
-[[package]]
-name = "alexandria_numeric"
-version = "0.1.0"
-source = "git+https://github.com/keep-starknet-strange/alexandria.git?rev=e7b6957#e7b69575f92076e96a83a76efa6bed3c32a15f9f"
-dependencies = [
- "alexandria_math",
-]
+version = "0.5.1"
+source = "git+https://github.com/keep-starknet-strange/alexandria.git?rev=c804e98#c804e98e6e9dc1677906bd65d44470615e42dabf"
 
 [[package]]
 name = "ekubo"
 version = "0.1.0"
-source = "git+https://github.com/EkuboProtocol/abis#946e1f3f97d48918d7cbd484de56bb2de8dd755e"
+source = "git+https://github.com/EkuboProtocol/abis#f4a16b95967c5596d5a3cd4e0422bb9a2e3eb017"
+
+[[package]]
+name = "snforge_scarb_plugin"
+version = "0.46.0"
+source = "git+https://github.com/foundry-rs/starknet-foundry?tag=v0.46.0#8586208d79496a1ccca23b9211e4f6ac910a8070"
 
 [[package]]
 name = "snforge_std"
-version = "0.21.0"
-source = "git+https://github.com/foundry-rs/starknet-foundry?tag=v0.21.0#2996b8c1dd66b2715fc67e69578089f278a46790"
+version = "0.46.0"
+source = "git+https://github.com/foundry-rs/starknet-foundry?tag=v0.46.0#8586208d79496a1ccca23b9211e4f6ac910a8070"
+dependencies = [
+ "snforge_scarb_plugin",
+]
 
 [[package]]
 name = "vesu"
 version = "0.1.0"
-source = "git+https://github.com/vesuxyz/vesu-v1#78cf26dd88c309a9d267e5968030e927a60cffcb"
+source = "git+https://github.com/vesuxyz/vesu-v1?branch=feat%2F2.11.4#bf617fb4ebea13250d651e5d471d0c66ee872a39"
 dependencies = [
  "alexandria_math",
  "snforge_std",
@@ -57,6 +37,7 @@ dependencies = [
 name = "vesu_periphery"
 version = "0.1.0"
 dependencies = [
+ "alexandria_math",
  "ekubo",
  "snforge_std",
  "vesu",
