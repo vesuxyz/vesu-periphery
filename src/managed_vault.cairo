@@ -44,7 +44,7 @@ pub trait IManagedVault<TContractState> {
     fn modify_delegation(
         ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool,
     );
-    fn modify_pool_id_status(ref self: TContractState, pool_id: felt252, is_accepted: bool);
+    fn modify_pool_id_status(ref self: TContractState, pool_id: felt252, is_approved: bool);
     fn is_pool_id_approved(self: @TContractState, pool_id: felt252) -> bool;
 
     // Management functions
@@ -157,7 +157,7 @@ pub mod ManagedVault {
         // (user, (timestamp, shares, nav_per_share_at_request))
         redemption_requests: Map<ContractAddress, (u64, u256, u256)>,
         // Map pools accepted by the owner
-        // (pool_id, is_accepted)
+        // (pool_id, is_approved)
         accepted_pool_ids: Map<felt252, bool>,
         // storage for the timestamp manager component
         #[substorage(v0)]
@@ -323,9 +323,9 @@ pub mod ManagedVault {
             self.singleton.read().modify_delegation(pool_id, delegatee, delegation);
         }
 
-        fn modify_pool_id_status(ref self: ContractState, pool_id: felt252, is_accepted: bool) {
+        fn modify_pool_id_status(ref self: ContractState, pool_id: felt252, is_approved: bool) {
             self.assert_owner();
-            self.accepted_pool_ids.write(pool_id, is_accepted);
+            self.accepted_pool_ids.write(pool_id, is_approved);
         }
 
         fn is_pool_id_approved(self: @ContractState, pool_id: felt252) -> bool {
