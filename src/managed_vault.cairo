@@ -236,7 +236,7 @@ pub mod ManagedVault {
             assert!(price_buy.is_valid, "price-buy-invalid");
             assert!(price_sell.value != 0, "price-sell-zero");
             assert!(price_buy.value != 0, "price-out-zero");
-            // TODO Protect this with.a read-only lock? Since owner has to approve the asset, is it
+            // TODO Protect this with a read-only lock? Since owner has to approve the asset, is it
             // even useful?
             let sell_token_decimals = IERC20Dispatcher { contract_address: sell_token }.decimals();
             let buy_token_decimals = IERC20Dispatcher { contract_address: buy_token }.decimals();
