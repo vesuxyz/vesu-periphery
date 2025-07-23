@@ -304,6 +304,7 @@ pub mod ManagedVault {
 
         /// Re-approves the vToken to be spendable by the extension
         fn approve_singleton(ref self: ContractState) {
+            self.assert_owner();
             self.asset.read().approve(self.singleton.read().contract_address, Bounded::MAX);
         }
 
