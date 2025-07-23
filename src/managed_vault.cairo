@@ -158,7 +158,7 @@ pub mod ManagedVault {
         redemption_requests: Map<ContractAddress, (u64, u256, u256)>,
         // Map pools accepted by the owner
         // (pool_id, is_approved)
-        accepted_pool_ids: Map<felt252, bool>,
+        approved_pool_ids: Map<felt252, bool>,
         // storage for the timestamp manager component
         #[substorage(v0)]
         position_list: position_list_component::Storage,
@@ -325,11 +325,11 @@ pub mod ManagedVault {
 
         fn modify_pool_id_status(ref self: ContractState, pool_id: felt252, is_approved: bool) {
             self.assert_owner();
-            self.accepted_pool_ids.write(pool_id, is_approved);
+            self.approved_pool_ids.write(pool_id, is_approved);
         }
 
         fn is_pool_id_approved(self: @ContractState, pool_id: felt252) -> bool {
-            self.accepted_pool_ids.read(pool_id)
+            self.approved_pool_ids.read(pool_id)
         }
 
         fn claim_rewards(
