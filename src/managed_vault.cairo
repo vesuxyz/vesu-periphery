@@ -156,6 +156,8 @@ pub mod ManagedVault {
         // Map of redemption requests
         // (user, (timestamp, shares, nav_per_share_at_request))
         redemption_requests: Map<ContractAddress, (u64, u256, u256)>,
+        // Map of approved assets from the owner
+        // (asset, is_approved)
         approved_asset: Map<ContractAddress, bool>,
         // storage for the timestamp manager component
         #[substorage(v0)]
