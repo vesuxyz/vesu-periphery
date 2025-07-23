@@ -100,7 +100,7 @@ pub mod ManagedVault {
     };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
     use vesu::common::calculate_collateral_and_debt_value;
-    use vesu::data_model::{Amount, AssetPrice, ModifyPositionParams, UpdatePositionResponse};
+    use vesu::data_model::{Amount, ModifyPositionParams, UpdatePositionResponse};
     use vesu::extension::interface::{IExtensionDispatcher, IExtensionDispatcherTrait};
     use vesu::math::pow_10;
     use vesu::singleton_v2::{ISingletonV2Dispatcher, ISingletonV2DispatcherTrait};
@@ -223,19 +223,33 @@ pub mod ManagedVault {
 
         fn assert_fair_rate(
             self: @ContractState,
+            sell_token: ContractAddress,
             sell_amount: u256,
-            bought_amount: u256,
-            price_sell: AssetPrice,
-            price_buy: AssetPrice,
+            buy_token: ContractAddress,
+            buy_amount: u256,
         ) {
+            let (extension, pool_id) = self.price_source();
+            let extension = IExtensionDispatcher { contract_address: extension };
+            let price_sell = extension.price(pool_id, sell_token);
+            let price_buy = extension.price(pool_id, buy_token);
             assert!(price_sell.is_valid, "price-sell-invalid");
             assert!(price_buy.is_valid, "price-buy-invalid");
             assert!(price_sell.value != 0, "price-sell-zero");
             assert!(price_buy.value != 0, "price-out-zero");
-            // TODO Assert price fairness
-        // assert(price out > (sell_amount * price * slippage) / (buy_price * scale))
-        // Rounding has to be Ceil in this case
-
+            // TODO Protect this with.a read-only lock? Since owner has to approve the asset, is it
+            // even useful?
+            let sell_token_decimals = IERC20Dispatcher { contract_address: sell_token }.decimals();
+            let buy_token_decimals = IERC20Dispatcher { contract_address: buy_token }.decimals();
+            // TODO slippage
+            // TODO handle rounding: has to be Ceil in this case
+            let min_bought_amount = if sell_token_decimals > buy_token_decimals {
+                let scale_div = pow_10(sell_token_decimals.into() - buy_token_decimals.into());
+                (sell_amount * price_sell.value) / (price_buy.value * scale_div)
+            } else {
+                let scale_mul = pow_10(buy_token_decimals.into() - sell_token_decimals.into());
+                (sell_amount * price_sell.value * scale_mul) / (price_buy.value)
+            };
+            assert!(buy_amount >= min_bought_amount, "price-out-too-low");
         }
 
         fn transfer_asset(
@@ -374,38 +388,35 @@ pub mod ManagedVault {
             self.assert_asset_approved(end_token);
             let start_token_dispatcher = IERC20Dispatcher { contract_address: start_token };
             let end_token_dispatcher = IERC20Dispatcher { contract_address: end_token };
-            let balance_in_before = start_token_dispatcher.balanceOf(get_contract_address());
-            let balance_out_before = end_token_dispatcher.balanceOf(get_contract_address());
+            let balance_start_before = start_token_dispatcher.balanceOf(get_contract_address());
+            let balance_end_before = end_token_dispatcher.balanceOf(get_contract_address());
             // Do the swap
-            let x = call_core_with_callback(
+            let _: () = call_core_with_callback(
                 self.ekubo_core.read(), @SwapParams { swap, limit_amount },
             );
-            // TODO Protect with an oracle enforced min slippage
-            let balance_in_after = start_token_dispatcher.balanceOf(get_contract_address());
-            let balance_out_after = end_token_dispatcher.balanceOf(get_contract_address());
+            let balance_start_after = start_token_dispatcher.balanceOf(get_contract_address());
+            let balance_end_after = end_token_dispatcher.balanceOf(get_contract_address());
             // Decide which token is in/out based on the balance change
-            let (extension, pool_id) = self.price_source();
-            let extension = IExtensionDispatcher { contract_address: extension };
-            let is_negative = balance_in_after < balance_in_before;
-            let (sell_amount, buy_amount, price_sell, price_buy) = if is_negative {
+            let is_selling_start_token = balance_start_after < balance_start_before;
+            let (sell_amount, buy_amount, sell_token, buy_token) = if is_selling_start_token {
+                assert!(balance_end_after > balance_end_before, "swap-balance-mismatch");
                 (
-                    balance_in_before - balance_in_after,
-                    balance_out_after - balance_out_before,
-                    extension.price(pool_id, start_token),
-                    extension.price(pool_id, end_token),
+                    balance_start_before - balance_start_after,
+                    balance_end_after - balance_end_before,
+                    start_token,
+                    end_token,
                 )
             } else {
+                assert!(balance_end_before > balance_end_after, "swap-balance-mismatch");
                 (
-                    balance_out_before - balance_out_after,
-                    balance_in_after - balance_in_before,
-                    extension.price(pool_id, end_token),
-                    extension.price(pool_id, start_token),
+                    balance_end_before - balance_end_after,
+                    balance_start_after - balance_start_before,
+                    end_token,
+                    start_token,
                 )
             };
 
-            self.assert_fair_rate(sell_amount, buy_amount, price_sell, price_buy);
-
-            x
+            self.assert_fair_rate(sell_token, sell_amount, buy_token, buy_amount);
         }
 
         fn modify_position(
