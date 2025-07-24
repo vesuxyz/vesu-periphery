@@ -18,7 +18,9 @@ mod Test_896150_ManagedVault {
     use vesu::singleton_v2::{ISingletonV2Dispatcher, ISingletonV2DispatcherTrait};
     use vesu::test::setup_v2::deploy_with_args;
     use vesu::units::SCALE;
-    use vesu_periphery::managed_vault::{IManagedVaultDispatcher, IManagedVaultDispatcherTrait};
+    use vesu_periphery::managed_vault::{
+        AssetConfig, IManagedVaultDispatcher, IManagedVaultDispatcherTrait,
+    };
     use vesu_periphery::multiply::IMultiplyDispatcher;
     use super::{IStarkgateERC20Dispatcher, IStarkgateERC20DispatcherTrait};
 
@@ -123,8 +125,15 @@ mod Test_896150_ManagedVault {
         cheat_caller_address(
             managed_vault.contract_address, get_contract_address(), CheatSpan::TargetCalls(2),
         );
-        managed_vault.modify_asset(usdc.contract_address, true);
-        managed_vault.modify_asset(eth.contract_address, true);
+        let is_legacy = false;
+        managed_vault
+            .modify_asset_configuration(
+                AssetConfig { asset: usdc.contract_address, pragma_id: 0, is_legacy },
+            );
+        managed_vault
+            .modify_asset_configuration(
+                AssetConfig { asset: eth.contract_address, pragma_id: 0, is_legacy },
+            );
 
         TestConfig {
             ekubo, singleton, multiply, managed_vault, pool_id, pool_key, eth, usdc, usdt, user,

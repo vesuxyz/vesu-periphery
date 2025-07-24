@@ -65,8 +65,10 @@ pub trait IManagedVault<TContractState> {
         ref self: TContractState, modify_lever_params: ModifyLeverParams,
     ) -> ModifyLeverResponse;
     fn nav(self: @TContractState) -> u256;
-    fn modify_asset(ref self: TContractState, asset: ContractAddress, is_approved: bool);
-    fn is_asset_approved(self: @TContractState, asset: ContractAddress) -> bool;
+    fn modify_asset_configuration(ref self: TContractState, asset_configuration: AssetConfig);
+    fn get_asset_configuration(
+        self: @TContractState, asset: ContractAddress,
+    ) -> Option<AssetConfig>;
 
     // User related functions
     fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
@@ -87,6 +89,14 @@ pub struct SwapParams {
     pub limit_amount: u128,
 }
 
+#[derive(Serde, Drop, Clone, Copy, starknet::Store)]
+pub struct AssetConfig {
+    pub asset: ContractAddress,
+    pub pragma_id: felt252,
+    pub is_legacy: bool,
+}
+
+
 #[starknet::contract]
 pub mod ManagedVault {
     use core::num::traits::{Bounded, Zero};
@@ -95,8 +105,8 @@ pub mod ManagedVault {
     };
     use ekubo::interfaces::core::{ICoreDispatcher, ILocker};
     use starknet::storage::{
-        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
-        StoragePointerWriteAccess,
+        Map, MutableVecTrait, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess, Vec, VecTrait,
     };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
     use vesu::common::calculate_collateral_and_debt_value;
@@ -108,8 +118,8 @@ pub mod ManagedVault {
     use vesu::vendor::erc20::{ERC20ABIDispatcher as IERC20Dispatcher, ERC20ABIDispatcherTrait};
     use vesu::vendor::erc20_component::ERC20Component;
     use vesu_periphery::managed_vault::{
-        Claim, IManagedVault, IMerkleDistributorDispatcher, IMerkleDistributorDispatcherTrait,
-        SwapParams,
+        AssetConfig, Claim, IManagedVault, IMerkleDistributorDispatcher,
+        IMerkleDistributorDispatcherTrait, SwapParams,
     };
     use vesu_periphery::multiply::{
         IMultiplyDispatcher, IMultiplyDispatcherTrait, ModifyLeverAction, ModifyLeverParams,
@@ -159,6 +169,7 @@ pub mod ManagedVault {
         // Map of approved assets from the owner
         // (asset, is_approved)
         approved_asset: Map<ContractAddress, bool>,
+        asset_config: Vec<AssetConfig>,
         // storage for the timestamp manager component
         #[substorage(v0)]
         position_list: position_list_component::Storage,
@@ -218,7 +229,7 @@ pub mod ManagedVault {
         }
 
         fn assert_asset_approved(self: @ContractState, asset: ContractAddress) {
-            assert!(self.is_asset_approved(asset), "asset-not-approved");
+            assert!(self.get_asset_configuration(asset).is_some(), "asset-not-approved");
         }
 
         fn assert_fair_rate(
@@ -228,6 +239,7 @@ pub mod ManagedVault {
             buy_token: ContractAddress,
             buy_amount: u256,
         ) {
+            // TODO Update get config and get price from pragma
             let (extension, pool_id) = self.price_source();
             let extension = IExtensionDispatcher { contract_address: extension };
             let price_sell = extension.price(pool_id, sell_token);
@@ -348,13 +360,30 @@ pub mod ManagedVault {
         }
 
 
-        fn modify_asset(ref self: ContractState, asset: ContractAddress, is_approved: bool) {
+        fn modify_asset_configuration(ref self: ContractState, asset_configuration: AssetConfig) {
             self.assert_owner();
-            self.approved_asset.write(asset, is_approved);
+            for asset_index in 0..self.asset_config.len() {
+                let asset_config = self.asset_config[asset_index].read();
+                if asset_config.asset == asset_configuration.asset {
+                    // Update existing asset configuration
+                    self.asset_config[asset_index].write(asset_configuration);
+                    return;
+                }
+            }
+            // If the asset configuration does not exist, add it
+            self.asset_config.push(asset_configuration);
         }
 
-        fn is_asset_approved(self: @ContractState, asset: ContractAddress) -> bool {
-            self.approved_asset.read(asset)
+        fn get_asset_configuration(
+            self: @ContractState, asset: ContractAddress,
+        ) -> Option<AssetConfig> {
+            for asset_index in 0..self.asset_config.len() {
+                let asset_config = self.asset_config[asset_index].read();
+                if asset_config.asset == asset {
+                    return Some(asset_config);
+                }
+            }
+            None
         }
 
         fn set_redemption_timeout(ref self: ContractState, timeout: u64) {
@@ -547,6 +576,20 @@ pub mod ManagedVault {
             let price = IExtensionDispatcher { contract_address: extension }
                 .price(pool_id, self.asset.read().contract_address);
             assets += balance * price.value / self.scale.read();
+
+            // Loop through all approved assets and add their value
+            for asset_index in 0..self.asset_config.len() {
+                let asset_config = self.asset_config[asset_index].read();
+                let balance = if asset_config.is_legacy {
+                    IERC20Dispatcher { contract_address: asset_config.asset }
+                        .balanceOf(get_contract_address())
+                } else {
+                    IERC20Dispatcher { contract_address: asset_config.asset }
+                        .balance_of(get_contract_address())
+                };
+                // TODO Get price from pragma and remove scale
+                assets += balance;
+            }
 
             assets - liabilities
         }
