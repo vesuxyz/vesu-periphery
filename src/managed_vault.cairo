@@ -166,9 +166,7 @@ pub mod ManagedVault {
         // Map of redemption requests
         // (user, (timestamp, shares, nav_per_share_at_request))
         redemption_requests: Map<ContractAddress, (u64, u256, u256)>,
-        // Map of approved assets from the owner
-        // (asset, is_approved)
-        approved_asset: Map<ContractAddress, bool>,
+        // List of all approved assets and their configuration
         asset_config: Vec<AssetConfig>,
         // storage for the timestamp manager component
         #[substorage(v0)]
@@ -362,6 +360,7 @@ pub mod ManagedVault {
 
         fn modify_asset_configuration(ref self: ContractState, asset_configuration: AssetConfig) {
             self.assert_owner();
+            // TODO Handle asset removal
             for asset_index in 0..self.asset_config.len() {
                 let asset_config = self.asset_config[asset_index].read();
                 if asset_config.asset == asset_configuration.asset {
