@@ -234,15 +234,16 @@ pub mod ManagedVault {
         fn assert_fair_rate(
             self: @ContractState,
             sell_token: ContractAddress,
+            sell_token_pool_id: felt252,
             sell_amount: u256,
             buy_token: ContractAddress,
+            buy_token_pool_id: felt252,
             buy_amount: u256,
         ) {
-            // TODO Update get config and get price from pragma
-            let (extension, pool_id) = self.price_source();
+            let (extension, _) = self.price_source();
             let extension = IExtensionDispatcher { contract_address: extension };
-            let price_sell = extension.price(pool_id, sell_token);
-            let price_buy = extension.price(pool_id, buy_token);
+            let price_sell = extension.price(sell_token_pool_id, sell_token);
+            let price_buy = extension.price(buy_token_pool_id, buy_token);
             assert!(price_sell.is_valid, "price-sell-invalid");
             assert!(price_buy.is_valid, "price-buy-invalid");
             assert!(price_sell.value != 0, "price-sell-zero");
@@ -418,6 +419,8 @@ pub mod ManagedVault {
 
         fn swap(ref self: ContractState, swap: Array<Swap>, limit_amount: u128) {
             self.assert_manager();
+            let this = get_contract_address();
+
             assert!(limit_amount > 0, "invalid-limit-amount");
             let start_token = *swap[0].route[0].pool_key.token0;
             let last_swap = swap[swap.len() - 1];
@@ -427,35 +430,78 @@ pub mod ManagedVault {
             let start_token_dispatcher = IERC20Dispatcher { contract_address: start_token };
             let end_token_dispatcher = IERC20Dispatcher { contract_address: end_token };
             // TODO Should there be a config to tell if asset is legacy or not?
-            let balance_start_before = start_token_dispatcher.balance_of(get_contract_address());
-            let balance_end_before = end_token_dispatcher.balance_of(get_contract_address());
+            let AssetConfig {
+                is_legacy: is_legacy_start_token, pool_id: start_token_pool_id,
+            } = self.get_asset_configuration(start_token).unwrap();
+            let balance_start_before = if is_legacy_start_token {
+                start_token_dispatcher.balanceOf(this)
+            } else {
+                start_token_dispatcher.balance_of(this)
+            };
+            let AssetConfig {
+                is_legacy: is_legacy_end_token, pool_id: end_token_pool_id,
+            } = self.get_asset_configuration(end_token).unwrap();
+            let balance_end_before = if is_legacy_end_token {
+                end_token_dispatcher.balanceOf(this)
+            } else {
+                end_token_dispatcher.balance_of(this)
+            };
             // Do the swap
             let _: () = call_core_with_callback(
                 self.ekubo_core.read(), @SwapParams { swap, limit_amount },
             );
-            let balance_start_after = start_token_dispatcher.balance_of(get_contract_address());
-            let balance_end_after = end_token_dispatcher.balance_of(get_contract_address());
+
+            let balance_start_after = if is_legacy_start_token {
+                start_token_dispatcher.balanceOf(this)
+            } else {
+                start_token_dispatcher.balance_of(this)
+            };
+            let balance_end_after = if is_legacy_end_token {
+                end_token_dispatcher.balanceOf(this)
+            } else {
+                end_token_dispatcher.balance_of(this)
+            };
             // Decide which token is in/out based on the balance change
             let is_selling_start_token = balance_start_after < balance_start_before;
-            let (sell_amount, buy_amount, sell_token, buy_token) = if is_selling_start_token {
+            let (
+                sell_token,
+                sell_token_pool_id,
+                sell_amount,
+                buy_token,
+                buy_token_pool_id,
+                buy_amount,
+            ) =
+                if is_selling_start_token {
                 assert!(balance_end_after > balance_end_before, "swap-balance-mismatch");
                 (
-                    balance_start_before - balance_start_after,
-                    balance_end_after - balance_end_before,
                     start_token,
+                    start_token_pool_id,
+                    balance_start_before - balance_start_after,
                     end_token,
+                    end_token_pool_id,
+                    balance_end_after - balance_end_before,
                 )
             } else {
                 assert!(balance_end_before > balance_end_after, "swap-balance-mismatch");
                 (
-                    balance_end_before - balance_end_after,
-                    balance_start_after - balance_start_before,
                     end_token,
+                    end_token_pool_id,
+                    balance_end_before - balance_end_after,
                     start_token,
+                    start_token_pool_id,
+                    balance_start_after - balance_start_before,
                 )
             };
 
-            self.assert_fair_rate(sell_token, sell_amount, buy_token, buy_amount);
+            self
+                .assert_fair_rate(
+                    sell_token,
+                    sell_token_pool_id,
+                    sell_amount,
+                    buy_token,
+                    buy_token_pool_id,
+                    buy_amount,
+                );
         }
 
         fn modify_position(
