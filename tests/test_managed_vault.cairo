@@ -128,11 +128,11 @@ mod Test_896150_ManagedVault {
         let is_legacy = false;
         managed_vault
             .modify_asset_configuration(
-                AssetConfig { asset: usdc.contract_address, pragma_id: 0, is_legacy },
+                usdc.contract_address, Some(AssetConfig { pragma_id: 1, is_legacy }),
             );
         managed_vault
             .modify_asset_configuration(
-                AssetConfig { asset: eth.contract_address, pragma_id: 0, is_legacy },
+                eth.contract_address, Some(AssetConfig { pragma_id: 2, is_legacy }),
             );
 
         TestConfig {

@@ -65,7 +65,9 @@ pub trait IManagedVault<TContractState> {
         ref self: TContractState, modify_lever_params: ModifyLeverParams,
     ) -> ModifyLeverResponse;
     fn nav(self: @TContractState) -> u256;
-    fn modify_asset_configuration(ref self: TContractState, asset_configuration: AssetConfig);
+    fn modify_asset_configuration(
+        ref self: TContractState, asset: ContractAddress, asset_configuration: Option<AssetConfig>,
+    );
     fn get_asset_configuration(
         self: @TContractState, asset: ContractAddress,
     ) -> Option<AssetConfig>;
@@ -89,9 +91,8 @@ pub struct SwapParams {
     pub limit_amount: u128,
 }
 
-#[derive(Serde, Drop, Clone, Copy, starknet::Store)]
+#[derive(Serde, PartialEq, Drop, Default, Clone, Copy, starknet::Store)]
 pub struct AssetConfig {
-    pub asset: ContractAddress,
     pub pragma_id: felt252,
     pub is_legacy: bool,
 }
@@ -167,7 +168,8 @@ pub mod ManagedVault {
         // (user, (timestamp, shares, nav_per_share_at_request))
         redemption_requests: Map<ContractAddress, (u64, u256, u256)>,
         // List of all approved assets and their configuration
-        asset_config: Vec<AssetConfig>,
+        // TODO This could be further improved by using a more efficient data structure
+        asset_config: Vec<(ContractAddress, AssetConfig)>,
         // storage for the timestamp manager component
         #[substorage(v0)]
         position_list: position_list_component::Storage,
@@ -358,28 +360,43 @@ pub mod ManagedVault {
         }
 
 
-        fn modify_asset_configuration(ref self: ContractState, asset_configuration: AssetConfig) {
+        fn modify_asset_configuration(
+            ref self: ContractState,
+            asset: ContractAddress,
+            asset_configuration: Option<AssetConfig>,
+        ) {
             self.assert_owner();
-            // TODO Handle asset removal
             for asset_index in 0..self.asset_config.len() {
-                let asset_config = self.asset_config[asset_index].read();
-                if asset_config.asset == asset_configuration.asset {
+                let (read_asset, _) = self.asset_config[asset_index].read();
+                if asset == read_asset {
                     // Update existing asset configuration
-                    self.asset_config[asset_index].write(asset_configuration);
+                    if let Some(configuration) = asset_configuration {
+                        assert!(configuration != Default::default(), "invalid-asset-configuration");
+                        self.asset_config[asset_index].write((read_asset, configuration));
+                    } else {
+                        // If the asset configuration is None, remove it
+                        self.asset_config[asset_index].write((read_asset, Default::default()));
+                    }
                     return;
                 }
             }
             // If the asset configuration does not exist, add it
-            self.asset_config.push(asset_configuration);
+            self
+                .asset_config
+                .push((asset, asset_configuration.expect('Missing asset configuration')));
         }
 
         fn get_asset_configuration(
             self: @ContractState, asset: ContractAddress,
         ) -> Option<AssetConfig> {
             for asset_index in 0..self.asset_config.len() {
-                let asset_config = self.asset_config[asset_index].read();
-                if asset_config.asset == asset {
-                    return Some(asset_config);
+                let (read_asset, config) = self.asset_config[asset_index].read();
+                if read_asset == asset {
+                    // Asset configuration was removed
+                    if config == Default::default() {
+                        return None;
+                    }
+                    return Some(config);
                 }
             }
             None
@@ -578,13 +595,11 @@ pub mod ManagedVault {
 
             // Loop through all approved assets and add their value
             for asset_index in 0..self.asset_config.len() {
-                let asset_config = self.asset_config[asset_index].read();
-                let balance = if asset_config.is_legacy {
-                    IERC20Dispatcher { contract_address: asset_config.asset }
-                        .balanceOf(get_contract_address())
+                let (asset, config) = self.asset_config[asset_index].read();
+                let balance = if config.is_legacy {
+                    IERC20Dispatcher { contract_address: asset }.balanceOf(get_contract_address())
                 } else {
-                    IERC20Dispatcher { contract_address: asset_config.asset }
-                        .balance_of(get_contract_address())
+                    IERC20Dispatcher { contract_address: asset }.balance_of(get_contract_address())
                 };
                 // TODO Get price from pragma and remove scale
                 assets += balance;
