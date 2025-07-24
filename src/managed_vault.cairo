@@ -235,19 +235,24 @@ pub mod ManagedVault {
             assert!(price_sell.is_valid, "price-sell-invalid");
             assert!(price_buy.is_valid, "price-buy-invalid");
             assert!(price_sell.value != 0, "price-sell-zero");
-            assert!(price_buy.value != 0, "price-out-zero");
-            // TODO Protect this with a read-only lock? Since owner has to approve the asset, is it
-            // even useful?
+            assert!(price_buy.value != 0, "price-buy-zero");
+            // TODO Protect this with a read-only lock?
+            // Since owner has to approve the asset, is it even useful?
+            // TODO Configurable slippage
+            let slippage_decimals = 4;
+            let slippage_bps = 95_00; // 95% of the price
             let sell_token_decimals = IERC20Dispatcher { contract_address: sell_token }.decimals();
-            let buy_token_decimals = IERC20Dispatcher { contract_address: buy_token }.decimals();
-            // TODO slippage
+            let buy_token_decimals = IERC20Dispatcher { contract_address: buy_token }
+                .decimals()
+                .into();
+            let decimals_total = sell_token_decimals.into() + slippage_decimals;
             // TODO handle rounding: has to be Ceil in this case
-            let min_bought_amount = if sell_token_decimals > buy_token_decimals {
-                let scale_div = pow_10(sell_token_decimals.into() - buy_token_decimals.into());
-                (sell_amount * price_sell.value) / (price_buy.value * scale_div)
+            let min_bought_amount = if decimals_total > buy_token_decimals {
+                let scale_div = pow_10(decimals_total - buy_token_decimals);
+                (sell_amount * price_sell.value * slippage_bps) / (price_buy.value * scale_div)
             } else {
-                let scale_mul = pow_10(buy_token_decimals.into() - sell_token_decimals.into());
-                (sell_amount * price_sell.value * scale_mul) / (price_buy.value)
+                let scale_mul = pow_10(buy_token_decimals - decimals_total);
+                (sell_amount * price_sell.value * scale_mul * slippage_bps) / (price_buy.value)
             };
             assert!(buy_amount >= min_bought_amount, "price-out-too-low");
         }
@@ -388,14 +393,15 @@ pub mod ManagedVault {
             self.assert_asset_approved(end_token);
             let start_token_dispatcher = IERC20Dispatcher { contract_address: start_token };
             let end_token_dispatcher = IERC20Dispatcher { contract_address: end_token };
-            let balance_start_before = start_token_dispatcher.balanceOf(get_contract_address());
-            let balance_end_before = end_token_dispatcher.balanceOf(get_contract_address());
+            // TODO Should there be a config to tell if asset is legacy or not?
+            let balance_start_before = start_token_dispatcher.balance_of(get_contract_address());
+            let balance_end_before = end_token_dispatcher.balance_of(get_contract_address());
             // Do the swap
             let _: () = call_core_with_callback(
                 self.ekubo_core.read(), @SwapParams { swap, limit_amount },
             );
-            let balance_start_after = start_token_dispatcher.balanceOf(get_contract_address());
-            let balance_end_after = end_token_dispatcher.balanceOf(get_contract_address());
+            let balance_start_after = start_token_dispatcher.balance_of(get_contract_address());
+            let balance_end_after = end_token_dispatcher.balance_of(get_contract_address());
             // Decide which token is in/out based on the balance change
             let is_selling_start_token = balance_start_after < balance_start_before;
             let (sell_amount, buy_amount, sell_token, buy_token) = if is_selling_start_token {
