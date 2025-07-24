@@ -231,6 +231,15 @@ pub mod ManagedVault {
             assert!(self.get_asset_configuration(asset).is_some(), "asset-not-approved");
         }
 
+        #[inline(always)]
+        fn balance_of_self(self: @ContractState, asset: ContractAddress, is_legacy: bool) -> u256 {
+            if is_legacy {
+                IERC20Dispatcher { contract_address: asset }.balanceOf(get_contract_address())
+            } else {
+                IERC20Dispatcher { contract_address: asset }.balance_of(get_contract_address())
+            }
+        }
+
         fn assert_fair_rate(
             self: @ContractState,
             sell_token: ContractAddress,
@@ -419,7 +428,6 @@ pub mod ManagedVault {
 
         fn swap(ref self: ContractState, swap: Array<Swap>, limit_amount: u128) {
             self.assert_manager();
-            let this = get_contract_address();
 
             assert!(limit_amount > 0, "invalid-limit-amount");
             let start_token = *swap[0].route[0].pool_key.token0;
@@ -427,40 +435,22 @@ pub mod ManagedVault {
             let end_token = *last_swap.route[last_swap.route.len() - 1].pool_key.token1;
             self.assert_asset_approved(start_token);
             self.assert_asset_approved(end_token);
-            let start_token_dispatcher = IERC20Dispatcher { contract_address: start_token };
-            let end_token_dispatcher = IERC20Dispatcher { contract_address: end_token };
             // TODO Should there be a config to tell if asset is legacy or not?
             let AssetConfig {
                 is_legacy: is_legacy_start_token, pool_id: start_token_pool_id,
             } = self.get_asset_configuration(start_token).unwrap();
-            let balance_start_before = if is_legacy_start_token {
-                start_token_dispatcher.balanceOf(this)
-            } else {
-                start_token_dispatcher.balance_of(this)
-            };
+            let balance_start_before = self.balance_of_self(start_token, is_legacy_start_token);
             let AssetConfig {
                 is_legacy: is_legacy_end_token, pool_id: end_token_pool_id,
             } = self.get_asset_configuration(end_token).unwrap();
-            let balance_end_before = if is_legacy_end_token {
-                end_token_dispatcher.balanceOf(this)
-            } else {
-                end_token_dispatcher.balance_of(this)
-            };
+            let balance_end_before = self.balance_of_self(end_token, is_legacy_end_token);
             // Do the swap
             let _: () = call_core_with_callback(
                 self.ekubo_core.read(), @SwapParams { swap, limit_amount },
             );
 
-            let balance_start_after = if is_legacy_start_token {
-                start_token_dispatcher.balanceOf(this)
-            } else {
-                start_token_dispatcher.balance_of(this)
-            };
-            let balance_end_after = if is_legacy_end_token {
-                end_token_dispatcher.balanceOf(this)
-            } else {
-                end_token_dispatcher.balance_of(this)
-            };
+            let balance_start_after = self.balance_of_self(start_token, is_legacy_start_token);
+            let balance_end_after = self.balance_of_self(end_token, is_legacy_end_token);
             // Decide which token is in/out based on the balance change
             let is_selling_start_token = balance_start_after < balance_start_before;
             let (
@@ -616,15 +606,12 @@ pub mod ManagedVault {
                 position = self.position_list.next(position);
             }
 
-            let balance = if self.is_legacy.read() {
-                self.asset.read().balanceOf(this)
-            } else {
-                self.asset.read().balance_of(this)
-            };
+            let asset = self.asset.read();
+            let balance = self.balance_of_self(asset.contract_address, self.is_legacy.read());
 
             let (extension, pool_id) = self.price_source();
             let extension = IExtensionDispatcher { contract_address: extension };
-            let price = extension.price(pool_id, self.asset.read().contract_address);
+            let price = extension.price(pool_id, asset.contract_address);
             assets += balance * price.value / self.scale.read();
 
             // Loop through all approved assets and add their value
@@ -633,7 +620,7 @@ pub mod ManagedVault {
             // Should it keep track
 
             for asset_index in 0..self.asset_config.len() {
-                let (asset, config) = self.asset_config[asset_index].read();
+                let (local_asset, config) = self.asset_config[asset_index].read();
                 // Skip if the asset configuration was removed
                 if config == Default::default() {
                     continue;
@@ -641,18 +628,14 @@ pub mod ManagedVault {
 
                 // Skip if the asset is the vault's underlying asset
                 // This is important to avoid double counting the asset
-                if asset == self.asset.read().contract_address {
+                if local_asset == asset.contract_address {
                     continue;
                 }
                 let AssetConfig { is_legacy, pool_id } = config;
-                let balance = if is_legacy {
-                    IERC20Dispatcher { contract_address: asset }.balanceOf(this)
-                } else {
-                    IERC20Dispatcher { contract_address: asset }.balance_of(this)
-                };
+                let balance = self.balance_of_self(local_asset, is_legacy);
 
-                let (collateral_asset_config, _) = singleton.asset_config(pool_id, asset);
-                let asset_price = extension.price(pool_id, asset);
+                let (collateral_asset_config, _) = singleton.asset_config(pool_id, local_asset);
+                let asset_price = extension.price(pool_id, local_asset);
 
                 assets += balance * asset_price.value / collateral_asset_config.scale;
             }
