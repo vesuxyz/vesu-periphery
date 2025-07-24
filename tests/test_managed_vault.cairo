@@ -127,13 +127,9 @@ mod Test_896150_ManagedVault {
         );
         let is_legacy = false;
         managed_vault
-            .modify_asset_configuration(
-                usdc.contract_address, Some(AssetConfig { pragma_id: 1, is_legacy }),
-            );
+            .modify_asset_configuration(usdc.contract_address, AssetConfig { is_legacy, pool_id });
         managed_vault
-            .modify_asset_configuration(
-                eth.contract_address, Some(AssetConfig { pragma_id: 2, is_legacy }),
-            );
+            .modify_asset_configuration(eth.contract_address, AssetConfig { is_legacy, pool_id });
 
         TestConfig {
             ekubo, singleton, multiply, managed_vault, pool_id, pool_key, eth, usdc, usdt, user,

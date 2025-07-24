@@ -66,7 +66,7 @@ pub trait IManagedVault<TContractState> {
     ) -> ModifyLeverResponse;
     fn nav(self: @TContractState) -> u256;
     fn modify_asset_configuration(
-        ref self: TContractState, asset: ContractAddress, asset_configuration: Option<AssetConfig>,
+        ref self: TContractState, asset: ContractAddress, asset_configuration: AssetConfig,
     );
     fn get_asset_configuration(
         self: @TContractState, asset: ContractAddress,
@@ -90,11 +90,10 @@ pub struct SwapParams {
     pub swap: Array<Swap>,
     pub limit_amount: u128,
 }
-
-#[derive(Serde, PartialEq, Drop, Default, Clone, Copy, starknet::Store)]
+#[derive(Serde, PartialEq, Drop, Clone, Default, Copy, starknet::Store)]
 pub struct AssetConfig {
-    pub pragma_id: felt252,
     pub is_legacy: bool,
+    pub pool_id: felt252,
 }
 
 
@@ -361,29 +360,18 @@ pub mod ManagedVault {
 
 
         fn modify_asset_configuration(
-            ref self: ContractState,
-            asset: ContractAddress,
-            asset_configuration: Option<AssetConfig>,
+            ref self: ContractState, asset: ContractAddress, asset_configuration: AssetConfig,
         ) {
             self.assert_owner();
             for asset_index in 0..self.asset_config.len() {
                 let (read_asset, _) = self.asset_config[asset_index].read();
                 if asset == read_asset {
-                    // Update existing asset configuration
-                    if let Some(configuration) = asset_configuration {
-                        assert!(configuration != Default::default(), "invalid-asset-configuration");
-                        self.asset_config[asset_index].write((read_asset, configuration));
-                    } else {
-                        // If the asset configuration is None, remove it
-                        self.asset_config[asset_index].write((read_asset, Default::default()));
-                    }
+                    self.asset_config[asset_index].write((read_asset, asset_configuration));
                     return;
                 }
             }
             // If the asset configuration does not exist, add it
-            self
-                .asset_config
-                .push((asset, asset_configuration.expect('Missing asset configuration')));
+            self.asset_config.push((asset, asset_configuration));
         }
 
         fn get_asset_configuration(
@@ -565,6 +553,7 @@ pub mod ManagedVault {
 
         fn nav(self: @ContractState) -> u256 {
             let singleton = self.singleton.read();
+            let this = get_contract_address();
 
             let mut assets = 0;
             let mut liabilities = 0;
@@ -572,8 +561,7 @@ pub mod ManagedVault {
 
             while (position != Zero::zero()) {
                 let Position { pool_id, collateral_asset, debt_asset } = position;
-                let context = singleton
-                    .context(pool_id, collateral_asset, debt_asset, get_contract_address());
+                let context = singleton.context(pool_id, collateral_asset, debt_asset, this);
                 let (_, collateral_value, _, debt_value) = calculate_collateral_and_debt_value(
                     context, context.position,
                 );
@@ -583,26 +571,44 @@ pub mod ManagedVault {
             }
 
             let balance = if self.is_legacy.read() {
-                self.asset.read().balanceOf(get_contract_address())
+                self.asset.read().balanceOf(this)
             } else {
-                self.asset.read().balance_of(get_contract_address())
+                self.asset.read().balance_of(this)
             };
 
             let (extension, pool_id) = self.price_source();
-            let price = IExtensionDispatcher { contract_address: extension }
-                .price(pool_id, self.asset.read().contract_address);
+            let extension = IExtensionDispatcher { contract_address: extension };
+            let price = extension.price(pool_id, self.asset.read().contract_address);
             assets += balance * price.value / self.scale.read();
 
             // Loop through all approved assets and add their value
+            // What if the asset is not in the pool?
+            // What if the asset feed isn't in usdc
+            // Should it keep track
+
             for asset_index in 0..self.asset_config.len() {
                 let (asset, config) = self.asset_config[asset_index].read();
-                let balance = if config.is_legacy {
-                    IERC20Dispatcher { contract_address: asset }.balanceOf(get_contract_address())
+                // Skip if the asset configuration was removed
+                if config == Default::default() {
+                    continue;
+                }
+
+                // Skip if the asset is the vault's underlying asset
+                // This is important to avoid double counting the asset
+                if asset == self.asset.read().contract_address {
+                    continue;
+                }
+                let AssetConfig { is_legacy, pool_id } = config;
+                let balance = if is_legacy {
+                    IERC20Dispatcher { contract_address: asset }.balanceOf(this)
                 } else {
-                    IERC20Dispatcher { contract_address: asset }.balance_of(get_contract_address())
+                    IERC20Dispatcher { contract_address: asset }.balance_of(this)
                 };
-                // TODO Get price from pragma and remove scale
-                assets += balance;
+
+                let (collateral_asset_config, _) = singleton.asset_config(pool_id, asset);
+                let asset_price = extension.price(pool_id, asset);
+
+                assets += balance * asset_price.value / collateral_asset_config.scale;
             }
 
             assets - liabilities
