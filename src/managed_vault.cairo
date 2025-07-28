@@ -94,6 +94,7 @@ pub struct SwapParams {
 pub struct AssetConfig {
     pub is_legacy: bool,
     // TODO Do we also need the extension?
+    // TODO Store scale?
     pub pool_id: felt252,
 }
 
