@@ -18,6 +18,7 @@ mod Test_896150_ManagedVault {
     use vesu::singleton_v2::{ISingletonV2Dispatcher, ISingletonV2DispatcherTrait};
     use vesu::test::setup_v2::deploy_with_args;
     use vesu::units::SCALE;
+    use vesu::vendor::pragma::AggregationMode;
     use vesu_periphery::managed_vault::{
         AssetConfig, IManagedVaultDispatcher, IManagedVaultDispatcherTrait,
     };
@@ -101,6 +102,7 @@ mod Test_896150_ManagedVault {
             ekubo.contract_address.into(),
             multiply.contract_address.into(),
             0,
+            0x02a85bd616f912537c50a49a4076db02c00b29b2cdc8a197ce92ed1837fa875b.try_into().unwrap(),
         ];
 
         let managed_vault = IManagedVaultDispatcher {
@@ -127,9 +129,33 @@ mod Test_896150_ManagedVault {
         );
         let is_legacy = false;
         managed_vault
-            .modify_asset_configuration(usdc.contract_address, AssetConfig { is_legacy, pool_id });
+            .modify_asset_configuration(
+                usdc.contract_address,
+                AssetConfig {
+                    is_legacy,
+                    scale: 1_000_000_000,
+                    pragma_key: 'USDC/USD',
+                    timeout: 60,
+                    number_of_sources: 1,
+                    start_time_offset: 1,
+                    time_window: 1,
+                    aggregation_mode: AggregationMode::Median,
+                },
+            );
         managed_vault
-            .modify_asset_configuration(eth.contract_address, AssetConfig { is_legacy, pool_id });
+            .modify_asset_configuration(
+                eth.contract_address,
+                AssetConfig {
+                    is_legacy,
+                    scale: 1_000_000_000_000_000_000,
+                    pragma_key: 'ETH/USD',
+                    timeout: 60,
+                    number_of_sources: 1,
+                    start_time_offset: 1,
+                    time_window: 1,
+                    aggregation_mode: AggregationMode::Median,
+                },
+            );
 
         TestConfig {
             ekubo, singleton, multiply, managed_vault, pool_id, pool_key, eth, usdc, usdt, user,

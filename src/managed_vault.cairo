@@ -215,7 +215,6 @@ pub mod ManagedVault {
         multiply: ContractAddress,
         redemption_timeout: u64,
         oracle_address: ContractAddress,
-        summary_address: ContractAddress,
     ) {
         self.erc20.initializer(name, symbol, decimals);
 
