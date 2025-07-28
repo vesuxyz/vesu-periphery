@@ -93,6 +93,7 @@ pub struct SwapParams {
 #[derive(Serde, PartialEq, Drop, Clone, Default, Copy, starknet::Store)]
 pub struct AssetConfig {
     pub is_legacy: bool,
+    // TODO Do we also need the extension?
     pub pool_id: felt252,
 }
 
