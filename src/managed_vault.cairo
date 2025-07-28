@@ -620,7 +620,7 @@ pub mod ManagedVault {
             // Should it keep track
 
             for asset_index in 0..self.asset_config.len() {
-                let (local_asset, config) = self.asset_config[asset_index].read();
+                let (read_asset, config) = self.asset_config[asset_index].read();
                 // Skip if the asset configuration was removed
                 if config == Default::default() {
                     continue;
@@ -628,14 +628,14 @@ pub mod ManagedVault {
 
                 // Skip if the asset is the vault's underlying asset
                 // This is important to avoid double counting the asset
-                if local_asset == asset.contract_address {
+                if read_asset == asset.contract_address {
                     continue;
                 }
                 let AssetConfig { is_legacy, pool_id } = config;
-                let balance = self.balance_of_self(local_asset, is_legacy);
+                let balance = self.balance_of_self(read_asset, is_legacy);
 
-                let (collateral_asset_config, _) = singleton.asset_config(pool_id, local_asset);
-                let asset_price = extension.price(pool_id, local_asset);
+                let (collateral_asset_config, _) = singleton.asset_config(pool_id, read_asset);
+                let asset_price = extension.price(pool_id, read_asset);
 
                 assets += balance * asset_price.value / collateral_asset_config.scale;
             }
