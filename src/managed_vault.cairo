@@ -1,5 +1,6 @@
 use starknet::ContractAddress;
-use vesu::data_model::{Amount, UpdatePositionResponse};
+use vesu::data_model::{Amount, AssetPrice, UpdatePositionResponse};
+use vesu::vendor::pragma::AggregationMode;
 use vesu_periphery::multiply::{ModifyLeverParams, ModifyLeverResponse};
 use vesu_periphery::swap::Swap;
 
@@ -44,6 +45,18 @@ pub trait IManagedVault<TContractState> {
     fn modify_delegation(
         ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool,
     );
+    fn modify_asset_configuration(
+        ref self: TContractState, asset: ContractAddress, asset_configuration: AssetConfig,
+    );
+    fn get_asset_configuration(
+        self: @TContractState, asset: ContractAddress,
+    ) -> Option<AssetConfig>;
+    fn pragma_oracle(self: @TContractState) -> ContractAddress;
+    fn set_oracle(ref self: TContractState, oracle_address: ContractAddress);
+    fn price(self: @TContractState, asset: ContractAddress) -> AssetPrice;
+    fn set_asset_configuration_parameter(
+        ref self: TContractState, asset: ContractAddress, parameter: felt252, value: felt252,
+    );
 
     // Management functions
     fn claim_rewards(
@@ -65,12 +78,6 @@ pub trait IManagedVault<TContractState> {
         ref self: TContractState, modify_lever_params: ModifyLeverParams,
     ) -> ModifyLeverResponse;
     fn nav(self: @TContractState) -> u256;
-    fn modify_asset_configuration(
-        ref self: TContractState, asset: ContractAddress, asset_configuration: AssetConfig,
-    );
-    fn get_asset_configuration(
-        self: @TContractState, asset: ContractAddress,
-    ) -> Option<AssetConfig>;
 
     // User related functions
     fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
@@ -93,11 +100,14 @@ pub struct SwapParams {
 #[derive(Serde, PartialEq, Drop, Clone, Default, Copy, starknet::Store)]
 pub struct AssetConfig {
     pub is_legacy: bool,
-    // TODO Do we also need the extension?
-    // TODO Store scale?
-    pub pool_id: felt252,
+    pub scale: u256,
+    pub pragma_key: felt252,
+    pub timeout: u64, // [seconds]
+    pub number_of_sources: u32, // [0, 255]
+    pub start_time_offset: u64, // [seconds]
+    pub time_window: u64, // [seconds]
+    pub aggregation_mode: AggregationMode,
 }
-
 
 #[starknet::contract]
 pub mod ManagedVault {
@@ -112,13 +122,14 @@ pub mod ManagedVault {
     };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
     use vesu::common::calculate_collateral_and_debt_value;
-    use vesu::data_model::{Amount, ModifyPositionParams, UpdatePositionResponse};
+    use vesu::data_model::{Amount, AssetPrice, ModifyPositionParams, UpdatePositionResponse};
     use vesu::extension::interface::{IExtensionDispatcher, IExtensionDispatcherTrait};
     use vesu::math::pow_10;
     use vesu::singleton_v2::{ISingletonV2Dispatcher, ISingletonV2DispatcherTrait};
     use vesu::units::SCALE;
     use vesu::vendor::erc20::{ERC20ABIDispatcher as IERC20Dispatcher, ERC20ABIDispatcherTrait};
     use vesu::vendor::erc20_component::ERC20Component;
+    use vesu::vendor::pragma::{DataType, IPragmaABIDispatcher, IPragmaABIDispatcherTrait};
     use vesu_periphery::managed_vault::{
         AssetConfig, Claim, IManagedVault, IMerkleDistributorDispatcher,
         IMerkleDistributorDispatcherTrait, SwapParams,
@@ -168,6 +179,8 @@ pub mod ManagedVault {
         // Map of redemption requests
         // (user, (timestamp, shares, nav_per_share_at_request))
         redemption_requests: Map<ContractAddress, (u64, u256, u256)>,
+        // Oracle related storage
+        pragma_oracle_address: ContractAddress,
         // List of all approved assets and their configuration
         // TODO This could be further improved by using a more efficient data structure
         asset_config: Vec<(ContractAddress, AssetConfig)>,
@@ -201,6 +214,8 @@ pub mod ManagedVault {
         ekubo_core: ContractAddress,
         multiply: ContractAddress,
         redemption_timeout: u64,
+        oracle_address: ContractAddress,
+        summary_address: ContractAddress,
     ) {
         self.erc20.initializer(name, symbol, decimals);
 
@@ -217,6 +232,8 @@ pub mod ManagedVault {
         self.multiply.write(IMultiplyDispatcher { contract_address: multiply });
 
         self.redemption_timeout.write(redemption_timeout);
+
+        self.pragma_oracle_address.write(oracle_address);
     }
 
     #[generate_trait]
@@ -245,20 +262,14 @@ pub mod ManagedVault {
         fn assert_fair_rate(
             self: @ContractState,
             sell_token: ContractAddress,
-            sell_token_pool_id: felt252,
             sell_amount: u256,
             buy_token: ContractAddress,
-            buy_token_pool_id: felt252,
             buy_amount: u256,
         ) {
-            let (extension, _) = self.price_source();
-            let extension = IExtensionDispatcher { contract_address: extension };
-            let price_sell = extension.price(sell_token_pool_id, sell_token);
-            let price_buy = extension.price(buy_token_pool_id, buy_token);
-            assert!(price_sell.is_valid, "price-sell-invalid");
-            assert!(price_buy.is_valid, "price-buy-invalid");
-            assert!(price_sell.value != 0, "price-sell-zero");
-            assert!(price_buy.value != 0, "price-buy-zero");
+            let price_sell = self.price(sell_token);
+            let price_buy = self.price(buy_token);
+            assert_price(price_sell);
+            assert_price(price_buy);
             // TODO Protect this with a read-only lock?
             // Since owner has to approve the asset, is it even useful?
             // TODO Configurable slippage
@@ -375,9 +386,12 @@ pub mod ManagedVault {
             ref self: ContractState, asset: ContractAddress, asset_configuration: AssetConfig,
         ) {
             self.assert_owner();
+            assert_asset_config(asset_configuration);
+
             for asset_index in 0..self.asset_config.len() {
                 let (read_asset, _) = self.asset_config[asset_index].read();
                 if asset == read_asset {
+                    // TODO Should we allow to update an existing asset configuration?
                     self.asset_config[asset_index].write((read_asset, asset_configuration));
                     return;
                 }
@@ -414,6 +428,85 @@ pub mod ManagedVault {
             self.singleton.read().modify_delegation(pool_id, delegatee, delegation);
         }
 
+        fn pragma_oracle(self: @ContractState) -> ContractAddress {
+            self.pragma_oracle_address.read()
+        }
+
+        fn set_oracle(ref self: ContractState, oracle_address: ContractAddress) {
+            self.assert_owner();
+            assert!(self.pragma_oracle_address.read().is_zero(), "oracle-already-initialized");
+            self.pragma_oracle_address.write(oracle_address);
+        }
+
+        fn price(self: @ContractState, asset: ContractAddress) -> AssetPrice {
+            let AssetConfig {
+                pragma_key,
+                timeout,
+                number_of_sources,
+                start_time_offset,
+                time_window,
+                aggregation_mode,
+                ..,
+            } = self.get_asset_configuration(asset).expect('asset-not-approved');
+            let dispatcher = IPragmaABIDispatcher {
+                contract_address: self.pragma_oracle_address.read(),
+            };
+            let response = dispatcher.get_data(DataType::SpotEntry(pragma_key), aggregation_mode);
+
+            // calculate the twap if start_time_offset and time_window are set
+            assert!(start_time_offset != 0, "start-time-offset-must-be-set");
+            assert!(time_window != 0, "time-window-must-be-set");
+            let value = response.price.into() * SCALE / pow_10(response.decimals.into());
+
+            // ensure that price is not stale and that the number of sources is sufficient
+            let time_delta = if response.last_updated_timestamp >= get_block_timestamp() {
+                0
+            } else {
+                get_block_timestamp() - response.last_updated_timestamp
+            };
+            let is_valid = (timeout == 0 || (timeout != 0 && time_delta <= timeout))
+                && (number_of_sources == 0
+                    || (number_of_sources != 0
+                        && number_of_sources <= response.num_sources_aggregated));
+
+            AssetPrice { value, is_valid }
+        }
+        fn set_asset_configuration_parameter(
+            ref self: ContractState, asset: ContractAddress, parameter: felt252, value: felt252,
+        ) {
+            self.assert_owner();
+
+            let mut oracle_config: AssetConfig = self
+                .get_asset_configuration(asset)
+                .expect('asset-not-approved');
+            assert!(oracle_config.pragma_key != 0, "oracle-config-not-set");
+
+            if parameter == 'is_legacy' {
+                oracle_config.is_legacy = value == 0;
+            } else if parameter == 'scale' {
+                oracle_config.scale = value.try_into().unwrap();
+            } else if parameter == 'pragma_key' {
+                oracle_config.pragma_key = value;
+            } else if parameter == 'timeout' {
+                oracle_config.timeout = value.try_into().unwrap();
+            } else if parameter == 'number_of_sources' {
+                oracle_config.number_of_sources = value.try_into().unwrap();
+            } else if parameter == 'start_time_offset' {
+                oracle_config.start_time_offset = value.try_into().unwrap();
+            } else if parameter == 'time_window' {
+                oracle_config.time_window = value.try_into().unwrap();
+            } else {
+                assert!(false, "invalid-oracle-parameter");
+            }
+
+            assert_asset_config(oracle_config);
+            self.modify_asset_configuration(asset, oracle_config);
+            // self.emit(SetOracleParameter { asset, parameter, value });
+        }
+        /////////////////////////
+        // Manager functions
+        /////////////////////////
+
         fn claim_rewards(
             ref self: ContractState,
             rewards_contract: ContractAddress,
@@ -439,11 +532,11 @@ pub mod ManagedVault {
             self.assert_asset_approved(end_token);
             // TODO Should there be a config to tell if asset is legacy or not?
             let AssetConfig {
-                is_legacy: is_legacy_start_token, pool_id: start_token_pool_id,
+                is_legacy: is_legacy_start_token, ..,
             } = self.get_asset_configuration(start_token).unwrap();
             let balance_start_before = self.balance_of_self(start_token, is_legacy_start_token);
             let AssetConfig {
-                is_legacy: is_legacy_end_token, pool_id: end_token_pool_id,
+                is_legacy: is_legacy_end_token, ..,
             } = self.get_asset_configuration(end_token).unwrap();
             let balance_end_before = self.balance_of_self(end_token, is_legacy_end_token);
             // Do the swap
@@ -455,45 +548,25 @@ pub mod ManagedVault {
             let balance_end_after = self.balance_of_self(end_token, is_legacy_end_token);
             // Decide which token is in/out based on the balance change
             let is_selling_start_token = balance_start_after < balance_start_before;
-            let (
-                sell_token,
-                sell_token_pool_id,
-                sell_amount,
-                buy_token,
-                buy_token_pool_id,
-                buy_amount,
-            ) =
-                if is_selling_start_token {
+            let (sell_token, sell_amount, buy_token, buy_amount) = if is_selling_start_token {
                 assert!(balance_end_after > balance_end_before, "swap-balance-mismatch");
                 (
                     start_token,
-                    start_token_pool_id,
                     balance_start_before - balance_start_after,
                     end_token,
-                    end_token_pool_id,
                     balance_end_after - balance_end_before,
                 )
             } else {
                 assert!(balance_end_before > balance_end_after, "swap-balance-mismatch");
                 (
                     end_token,
-                    end_token_pool_id,
                     balance_end_before - balance_end_after,
                     start_token,
-                    start_token_pool_id,
                     balance_start_after - balance_start_before,
                 )
             };
 
-            self
-                .assert_fair_rate(
-                    sell_token,
-                    sell_token_pool_id,
-                    sell_amount,
-                    buy_token,
-                    buy_token_pool_id,
-                    buy_amount,
-                );
+            self.assert_fair_rate(sell_token, sell_amount, buy_token, buy_amount);
         }
 
         fn modify_position(
@@ -633,13 +706,11 @@ pub mod ManagedVault {
                 if read_asset == asset.contract_address {
                     continue;
                 }
-                let AssetConfig { is_legacy, pool_id } = config;
+                let AssetConfig { is_legacy, scale, .. } = config;
                 let balance = self.balance_of_self(read_asset, is_legacy);
-
-                let (collateral_asset_config, _) = singleton.asset_config(pool_id, read_asset);
-                let asset_price = extension.price(pool_id, read_asset);
-
-                assets += balance * asset_price.value / collateral_asset_config.scale;
+                let asset_price = self.price(read_asset);
+                assert_price(asset_price);
+                assets += balance * asset_price.value / scale;
             }
 
             assets - liabilities
@@ -705,5 +776,18 @@ pub mod ManagedVault {
                 .redemption_requests
                 .write(get_caller_address(), (get_block_timestamp(), shares, per_share_nav));
         }
+    }
+
+    pub fn assert_asset_config(asset_config: AssetConfig) {
+        assert!(asset_config.pragma_key != 0, "pragma-key-must-be-set");
+        assert!(
+            asset_config.time_window <= asset_config.start_time_offset,
+            "time-window-must-be-less-than-start-time-offset",
+        );
+    }
+
+    fn assert_price(price: AssetPrice) {
+        assert!(price.is_valid, "price-invalid");
+        assert!(price.value != 0, "price-zero");
     }
 }
