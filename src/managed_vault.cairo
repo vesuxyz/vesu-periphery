@@ -274,6 +274,7 @@ pub mod ManagedVault {
             // TODO Configurable slippage
             let slippage_decimals = 4;
             let slippage_bps = 95_00; // 95% of the price
+            // TODO Could use scale from the asset config instead of calling decimals
             let sell_token_decimals = IERC20Dispatcher { contract_address: sell_token }.decimals();
             let buy_token_decimals = IERC20Dispatcher { contract_address: buy_token }
                 .decimals()
@@ -470,6 +471,7 @@ pub mod ManagedVault {
 
             AssetPrice { value, is_valid }
         }
+
         fn set_asset_configuration_parameter(
             ref self: ContractState, asset: ContractAddress, parameter: felt252, value: felt252,
         ) {
@@ -529,7 +531,7 @@ pub mod ManagedVault {
             let end_token = *last_swap.route[last_swap.route.len() - 1].pool_key.token1;
             self.assert_asset_approved(start_token);
             self.assert_asset_approved(end_token);
-            // TODO Should there be a config to tell if asset is legacy or not?
+
             let AssetConfig {
                 is_legacy: is_legacy_start_token, ..,
             } = self.get_asset_configuration(start_token).unwrap();
@@ -689,10 +691,6 @@ pub mod ManagedVault {
             assets += balance * price.value / self.scale.read();
 
             // Loop through all approved assets and add their value
-            // What if the asset is not in the pool?
-            // What if the asset feed isn't in usdc
-            // Should it keep track
-
             for asset_index in 0..self.asset_config.len() {
                 let (read_asset, config) = self.asset_config[asset_index].read();
                 // Skip if the asset configuration was removed
