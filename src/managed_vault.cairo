@@ -58,6 +58,13 @@ pub trait IManagedVault<TContractState> {
         ref self: TContractState, asset: ContractAddress, parameter: felt252, value: felt252,
     );
 
+    fn set_deposit_fee(ref self: TContractState, fee: u16);
+    fn get_deposit_fee(self: @TContractState) -> u16;
+    fn set_performance_fee(ref self: TContractState, fee: u16);
+    fn get_performance_fee(self: @TContractState) -> u16;
+    fn set_fee_recipient(ref self: TContractState, recipient: ContractAddress);
+    fn get_fee_recipient(self: @TContractState) -> ContractAddress;
+
     // Management functions
     fn claim_rewards(
         ref self: TContractState,
@@ -85,6 +92,9 @@ pub trait IManagedVault<TContractState> {
 
     fn redeem(ref self: TContractState, receiver: ContractAddress, owner: ContractAddress) -> u256;
     fn request_redeem(ref self: TContractState, shares: u256);
+
+    // Fee recipient functions
+    fn claim_fees(ref self: TContractState) -> u256;
 }
 
 #[starknet::interface]
@@ -153,6 +163,9 @@ pub mod ManagedVault {
     impl ERC20CamelOnlyImpl = ERC20Component::ERC20CamelOnlyImpl<ContractState>;
     impl ERC20InternalImpl = ERC20Component::InternalImpl<ContractState>;
 
+    // TODO Should it even be possible to allow 100% fees?
+    const MAX_BPS: u16 = 100_00; // 100% in basis points
+
     #[storage]
     struct Storage {
         // The vault's underlying asset
@@ -184,6 +197,12 @@ pub mod ManagedVault {
         // List of all approved assets and their configuration
         // TODO This could be further improved by using a more efficient data structure
         asset_config: Vec<(ContractAddress, AssetConfig)>,
+        // Fee configurations in basis points (bps)
+        deposit_fee: u16,
+        performance_fee: u16,
+        fee_recipient: ContractAddress,
+        last_index: u256,
+        fee_shares: u256,
         // storage for the timestamp manager component
         #[substorage(v0)]
         position_list: position_list_component::Storage,
@@ -327,25 +346,32 @@ pub mod ManagedVault {
             }
         }
 
-        fn compute_index(self: @ContractState, total_supply: u256, nav: u256) -> u256 {
-            if total_supply == 0 {
+        fn unsafe_compute_index(self: @ContractState, total_supply: u256, nav: u256) -> u256 {
+            let last_index = if total_supply == 0 {
                 SCALE
             } else {
                 nav * SCALE / total_supply
-            }
+            };
+            last_index
+        }
+
+        fn compute_index(ref self: ContractState, total_supply: u256, nav: u256) -> u256 {
+            let last_index = self.unsafe_compute_index(total_supply, nav);
+            self.last_index.write(last_index);
+            last_index
         }
 
         fn convert_to_assets(
             self: @ContractState, total_supply: u256, nav: u256, shares_delta: u256,
         ) -> u256 {
-            let index = self.compute_index(total_supply, nav);
+            let index = self.unsafe_compute_index(total_supply, nav);
             (shares_delta * index / SCALE) * self.scale.read() / SCALE
         }
 
         fn convert_to_shares(
             self: @ContractState, total_supply: u256, nav: u256, assets_delta: u256,
         ) -> u256 {
-            let index = self.compute_index(total_supply, nav);
+            let index = self.unsafe_compute_index(total_supply, nav);
             (assets_delta * SCALE / self.scale.read()) * SCALE / index
         }
     }
@@ -504,6 +530,38 @@ pub mod ManagedVault {
             self.modify_asset_configuration(asset, oracle_config);
             // self.emit(SetOracleParameter { asset, parameter, value });
         }
+
+        // Fee management functions
+        fn set_deposit_fee(ref self: ContractState, fee: u16) {
+            self.assert_owner();
+            assert!(fee <= MAX_BPS, "invalid-deposit-fee");
+            self.deposit_fee.write(fee);
+        }
+
+        fn get_deposit_fee(self: @ContractState) -> u16 {
+            self.deposit_fee.read()
+        }
+
+        fn set_performance_fee(ref self: ContractState, fee: u16) {
+            self.assert_owner();
+            assert!(fee <= MAX_BPS, "invalid-performance-fee");
+            self.performance_fee.write(fee);
+        }
+
+        fn get_performance_fee(self: @ContractState) -> u16 {
+            self.performance_fee.read()
+        }
+
+        fn set_fee_recipient(ref self: ContractState, recipient: ContractAddress) {
+            self.assert_owner();
+            assert!(recipient.is_non_zero(), "invalid-fee-recipient");
+            self.fee_recipient.write(recipient);
+        }
+
+        fn get_fee_recipient(self: @ContractState) -> ContractAddress {
+            self.fee_recipient.read()
+        }
+
         /////////////////////////
         // Manager functions
         /////////////////////////
@@ -713,20 +771,41 @@ pub mod ManagedVault {
             assets - liabilities
         }
 
+        // Returns the amount of shares that the receiver will receive
         fn deposit(ref self: ContractState, assets: u256, receiver: ContractAddress) -> u256 {
             self.transfer_asset(get_caller_address(), get_contract_address(), assets);
 
-            let vault_shares = self
+            let deposit_fee = self.deposit_fee.read();
+
+            let mut vault_shares = self
                 .convert_to_shares(self.erc20.total_supply(), self.nav(), assets);
+
+            if deposit_fee > 0 {
+                let fee_recipient = self.get_fee_recipient();
+                // TODO Rounding
+                let fee_amount = (vault_shares * deposit_fee.into()) / MAX_BPS.into();
+                vault_shares -= fee_amount;
+                self.erc20._mint(fee_recipient, fee_amount);
+            }
+
             self.erc20._mint(receiver, vault_shares);
 
             vault_shares
         }
 
-        fn mint(ref self: ContractState, shares: u256, receiver: ContractAddress) -> u256 {
+        fn mint(ref self: ContractState, mut shares: u256, receiver: ContractAddress) -> u256 {
             let assets = self.convert_to_assets(self.erc20.total_supply(), self.nav(), shares);
 
             self.transfer_asset(get_caller_address(), get_contract_address(), assets);
+
+            let deposit_fee = self.deposit_fee.read();
+            if deposit_fee > 0 {
+                let fee_recipient = self.get_fee_recipient();
+                // TODO Rounding
+                let fee_amount = (shares * deposit_fee.into()) / MAX_BPS.into();
+                shares -= fee_amount;
+                self.erc20._mint(fee_recipient, fee_amount);
+            }
 
             self.erc20._mint(receiver, shares);
 
@@ -772,6 +851,15 @@ pub mod ManagedVault {
             self
                 .redemption_requests
                 .write(get_caller_address(), (get_block_timestamp(), shares, per_share_nav));
+        }
+
+        // Fee recipient functions
+        fn claim_fees(ref self: ContractState) -> u256 {
+            let fee_recipient = self.get_fee_recipient();
+            assert!(fee_recipient.is_non_zero(), "fee-recipient-not-set");
+            assert!(get_caller_address() == fee_recipient, "caller-not-fee-recipient");
+            // TODO implement fee claiming logic
+            0
         }
     }
 
