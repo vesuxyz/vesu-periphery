@@ -94,6 +94,7 @@ pub trait IManagedVault<TContractState> {
     fn request_redeem(ref self: TContractState, shares: u256);
 
     // Fee recipient functions
+    fn pending_fees(self: @TContractState) -> u256;
     fn claim_fees(ref self: TContractState) -> u256;
 }
 
@@ -775,17 +776,15 @@ pub mod ManagedVault {
         fn deposit(ref self: ContractState, assets: u256, receiver: ContractAddress) -> u256 {
             self.transfer_asset(get_caller_address(), get_contract_address(), assets);
 
-            let deposit_fee = self.deposit_fee.read();
-
             let mut vault_shares = self
                 .convert_to_shares(self.erc20.total_supply(), self.nav(), assets);
 
+            let deposit_fee = self.deposit_fee.read();
             if deposit_fee > 0 {
-                let fee_recipient = self.get_fee_recipient();
                 // TODO Rounding
                 let fee_amount = (vault_shares * deposit_fee.into()) / MAX_BPS.into();
                 vault_shares -= fee_amount;
-                self.erc20._mint(fee_recipient, fee_amount);
+                self.fee_shares.write(self.fee_shares.read() + fee_amount);
             }
 
             self.erc20._mint(receiver, vault_shares);
@@ -800,11 +799,10 @@ pub mod ManagedVault {
 
             let deposit_fee = self.deposit_fee.read();
             if deposit_fee > 0 {
-                let fee_recipient = self.get_fee_recipient();
                 // TODO Rounding
                 let fee_amount = (shares * deposit_fee.into()) / MAX_BPS.into();
                 shares -= fee_amount;
-                self.erc20._mint(fee_recipient, fee_amount);
+                self.fee_shares.write(self.fee_shares.read() + fee_amount);
             }
 
             self.erc20._mint(receiver, shares);
@@ -854,12 +852,17 @@ pub mod ManagedVault {
         }
 
         // Fee recipient functions
+        fn pending_fees(self: @ContractState) -> u256 {
+            self.fee_shares.read()
+        }
+
         fn claim_fees(ref self: ContractState) -> u256 {
             let fee_recipient = self.get_fee_recipient();
             assert!(fee_recipient.is_non_zero(), "fee-recipient-not-set");
             assert!(get_caller_address() == fee_recipient, "caller-not-fee-recipient");
-            // TODO implement fee claiming logic
-            0
+            let shares = self.fee_shares.read();
+            self.erc20._mint(fee_recipient, shares);
+            shares
         }
     }
 

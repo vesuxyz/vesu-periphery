@@ -310,7 +310,8 @@ mod Test_896150_ManagedVault {
         usdc.approve(managed_vault.contract_address, amount);
         managed_vault.deposit(amount, user);
 
-        assert!(vault_erc_20.balanceOf(fee_recipient) * 9 == vault_erc_20.balanceOf(user));
+        assert!(vault_erc_20.balanceOf(fee_recipient) == 0);
+        assert!(managed_vault.pending_fees() * 9 == vault_erc_20.balanceOf(user)); // 10% of 10000
     }
 
     #[test]
@@ -332,6 +333,7 @@ mod Test_896150_ManagedVault {
         usdc.approve(managed_vault.contract_address, amount);
         managed_vault.mint(amount, user);
 
-        assert!(vault_erc_20.balanceOf(fee_recipient) * 9 == vault_erc_20.balanceOf(user));
+        assert!(vault_erc_20.balanceOf(fee_recipient) == 0);
+        assert!(managed_vault.pending_fees() * 9 == vault_erc_20.balanceOf(user)); // 10% of 10000
     }
 }
