@@ -330,12 +330,12 @@ mod Test_896150_ManagedVault {
     #[test]
     #[available_gas(20000000)]
     #[fork("Mainnet")]
-    fn test_managed_vault_deposit_with_fee() {
+    fn test_managed_vault_redeem_with_fee() {
         let TestConfig { managed_vault, eth, vault_erc_20, usdc, user, .. } = setup();
 
         cheat_caller_address(managed_vault.contract_address, OWNER, CheatSpan::TargetCalls(2));
         let fee_recipient = 'fee_recipient'.try_into().unwrap();
-        managed_vault.set_performance_fee(10_00); // 10%
+        managed_vault.set_withdrawal_fee(10_00); // 10%
         managed_vault.set_fee_recipient(fee_recipient);
 
         usdc.approve(managed_vault.contract_address, 10000_000_000.into());
@@ -392,15 +392,12 @@ mod Test_896150_ManagedVault {
 
         let user_balance_before = vault_erc_20.balanceOf(user);
         managed_vault.redeem(user, user);
-        println!("user_balance_before: {}", user_balance_before);
-        println!("vault_erc_20.balanceOf(user): {}", managed_vault.pending_fees());
-        assert!(managed_vault.pending_fees() * 9 == user_balance_before);
-
+        assert!(managed_vault.pending_fees() == user_balance_before / 10);
         cheat_caller_address(
             managed_vault.contract_address, fee_recipient, CheatSpan::TargetCalls(1),
         );
         managed_vault.claim_fees();
-        assert!(vault_erc_20.balanceOf(fee_recipient) == 0);
+        assert!(vault_erc_20.balanceOf(fee_recipient) == user_balance_before / 10);
         assert!(usdc.balanceOf(fee_recipient) == 0);
     }
 }
