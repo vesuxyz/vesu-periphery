@@ -51,6 +51,7 @@ pub trait IManagedVault<TContractState> {
     fn get_asset_configuration(
         self: @TContractState, asset: ContractAddress,
     ) -> Option<AssetConfig>;
+    fn get_approved_assets(self: @TContractState) -> Array<(ContractAddress, AssetConfig)>;
     fn pragma_oracle(self: @TContractState) -> ContractAddress;
     fn set_oracle(ref self: TContractState, oracle_address: ContractAddress);
     fn price(self: @TContractState, asset: ContractAddress) -> AssetPrice;
@@ -247,6 +248,19 @@ pub mod ManagedVault {
 
         fn assert_asset_approved(self: @ContractState, asset: ContractAddress) {
             assert!(self.get_asset_configuration(asset).is_some(), "asset-not-approved");
+        }
+
+        fn get_approved_assets(self: @ContractState) -> Array<(ContractAddress, AssetConfig)> {
+            let mut approved_assets = array![];
+            for asset_index in 0..self.asset_config.len() {
+                let (read_asset, config) = self.asset_config[asset_index].read();
+                // Skip if the asset configuration was removed
+                if config == Default::default() {
+                    continue;
+                }
+                approved_assets.append((read_asset, config));
+            }
+            approved_assets
         }
 
         #[inline(always)]
