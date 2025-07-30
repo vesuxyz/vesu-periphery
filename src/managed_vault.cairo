@@ -28,6 +28,15 @@ trait IERC4626<TContractState> {
     ) -> u256;
 }
 
+#[starknet::interface]
+trait IERC7540<TContractState> {
+    fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
+    fn mint(ref self: TContractState, shares: u256, receiver: ContractAddress) -> u256;
+
+    fn redeem(ref self: TContractState, receiver: ContractAddress, owner: ContractAddress) -> u256;
+    fn request_redeem(ref self: TContractState, shares: u256);
+}
+
 #[derive(Drop, Copy, Serde)]
 pub struct Claim {
     pub id: u64,
@@ -86,14 +95,17 @@ pub trait IManagedVault<TContractState> {
     fn modify_lever(
         ref self: TContractState, modify_lever_params: ModifyLeverParams,
     ) -> ModifyLeverResponse;
+    fn deposit_to_vault(
+        ref self: TContractState,
+        vault: ContractAddress,
+        asset_address: ContractAddress,
+        assets: u256,
+    ) -> u256;
+    fn request_redeem_from_vault(ref self: TContractState, vault: ContractAddress, shares: u256);
+    fn redeem_from_vault(ref self: TContractState, vault: ContractAddress) -> u256;
+
+    // Other
     fn nav(self: @TContractState) -> u256;
-
-    // User related functions
-    fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
-    fn mint(ref self: TContractState, shares: u256, receiver: ContractAddress) -> u256;
-
-    fn redeem(ref self: TContractState, receiver: ContractAddress, owner: ContractAddress) -> u256;
-    fn request_redeem(ref self: TContractState, shares: u256);
 }
 
 #[starknet::interface]
@@ -140,7 +152,8 @@ pub mod ManagedVault {
     use vesu::vendor::erc20_component::ERC20Component;
     use vesu::vendor::pragma::{DataType, IPragmaABIDispatcher, IPragmaABIDispatcherTrait};
     use vesu_periphery::managed_vault::{
-        AssetConfig, Claim, IManagedVault, IMerkleDistributorDispatcher,
+        AssetConfig, Claim, IERC4626Dispatcher, IERC4626DispatcherTrait, IERC7540,
+        IERC7540Dispatcher, IERC7540DispatcherTrait, IManagedVault, IMerkleDistributorDispatcher,
         IMerkleDistributorDispatcherTrait, SwapParams,
     };
     use vesu_periphery::multiply::{
@@ -259,6 +272,10 @@ pub mod ManagedVault {
 
         fn assert_asset_approved(self: @ContractState, asset: ContractAddress) {
             assert!(self.get_asset_configuration(asset).is_some(), "asset-not-approved");
+        }
+
+        fn assert_vault_approved(self: @ContractState, vault: ContractAddress) {
+            assert!(self.get_vault_configuration(vault).is_some(), "vault-not-approved");
         }
 
         #[inline(always)]
@@ -581,6 +598,7 @@ pub mod ManagedVault {
             self.modify_asset_configuration(asset, oracle_config);
             // self.emit(SetOracleParameter { asset, parameter, value });
         }
+
         /////////////////////////
         // Manager functions
         /////////////////////////
@@ -740,6 +758,43 @@ pub mod ManagedVault {
             response
         }
 
+        fn deposit_to_vault(
+            ref self: ContractState,
+            vault: ContractAddress,
+            asset_address: ContractAddress,
+            assets: u256,
+        ) -> u256 {
+            self.assert_manager();
+            self.assert_vault_approved(vault);
+            self.assert_asset_approved(asset_address);
+
+            let erc20_dispatcher = IERC20Dispatcher { contract_address: asset_address };
+            erc20_dispatcher.approve(vault, assets);
+            let shares = IERC4626Dispatcher { contract_address: vault }
+                .deposit(assets, get_contract_address());
+            erc20_dispatcher.approve(vault, 0);
+
+            shares
+        }
+
+        fn request_redeem_from_vault(
+            ref self: ContractState, vault: ContractAddress, shares: u256,
+        ) {
+            self.assert_manager();
+            self.assert_vault_approved(vault);
+            IERC7540Dispatcher { contract_address: vault }.request_redeem(shares);
+        }
+
+        // As redeem can be called by anyone and on behalf of anyone, should we assert_manager?
+        // We should ensure vault is approved to make sure this contract doesn't call a random
+        // contract
+        fn redeem_from_vault(ref self: ContractState, vault: ContractAddress) -> u256 {
+            self.assert_manager();
+            self.assert_vault_approved(vault);
+            let this = get_contract_address();
+            IERC7540Dispatcher { contract_address: vault }.redeem(this, this)
+        }
+
         fn nav(self: @ContractState) -> u256 {
             let singleton = self.singleton.read();
             let this = get_contract_address();
@@ -768,13 +823,21 @@ pub mod ManagedVault {
             assets += balance * price.value / self.scale.read();
 
             // Loop through all approved assets and add their value
-            for asset_index in 0..self.asset_config.len() {
-                let (read_asset, config) = self.asset_config[asset_index].read();
-                // Skip if the asset configuration was removed
-                if config == Default::default() {
+            for (read_asset, config) in self.get_approved_assets() {
+                // Skip if the asset is the vault's underlying asset
+                // This is important to avoid double counting the asset
+                if read_asset == asset.contract_address {
                     continue;
                 }
+                let AssetConfig { is_legacy, scale, .. } = config;
+                let balance = self.balance_of_self(read_asset, is_legacy);
+                let asset_price = self.price(read_asset);
+                assert_price(asset_price);
+                assets += balance * asset_price.value / scale;
+            }
 
+            // Loop through all approved vaults and add their value
+            for (read_asset, config) in self.get_approved_vaults() {
                 // Skip if the asset is the vault's underlying asset
                 // This is important to avoid double counting the asset
                 if read_asset == asset.contract_address {
@@ -789,7 +852,10 @@ pub mod ManagedVault {
 
             assets - liabilities
         }
+    }
 
+    #[abi(embed_v0)]
+    impl ERC7540Impl of IERC7540<ContractState> {
         fn deposit(ref self: ContractState, assets: u256, receiver: ContractAddress) -> u256 {
             self.transfer_asset(get_caller_address(), get_contract_address(), assets);
 
