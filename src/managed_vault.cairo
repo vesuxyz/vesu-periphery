@@ -60,6 +60,8 @@ pub trait IManagedVault<TContractState> {
 
     fn set_deposit_fee(ref self: TContractState, fee: u16);
     fn get_deposit_fee(self: @TContractState) -> u16;
+    fn set_withdrawal_fee(ref self: TContractState, fee: u16);
+    fn get_withdrawal_fee(self: @TContractState) -> u16;
     fn set_performance_fee(ref self: TContractState, fee: u16);
     fn get_performance_fee(self: @TContractState) -> u16;
     fn set_fee_recipient(ref self: TContractState, recipient: ContractAddress);
@@ -200,6 +202,7 @@ pub mod ManagedVault {
         asset_config: Vec<(ContractAddress, AssetConfig)>,
         // Fee configurations in basis points (bps)
         deposit_fee: u16,
+        withdrawal_fee: u16,
         performance_fee: u16,
         fee_recipient: ContractAddress,
         last_index: u256,
@@ -375,6 +378,11 @@ pub mod ManagedVault {
             let index = self.unsafe_compute_index(total_supply, nav);
             (assets_delta * SCALE / self.scale.read()) * SCALE / index
         }
+
+        fn update_fee_shares(ref self: ContractState, shares: u256) {
+            self.fee_shares.write(self.fee_shares.read() + shares);
+            self.erc20.ERC20_total_supply.write(self.erc20.ERC20_total_supply.read() + shares);
+        }
     }
 
     #[abi(embed_v0)]
@@ -543,6 +551,16 @@ pub mod ManagedVault {
             self.deposit_fee.read()
         }
 
+        fn set_withdrawal_fee(ref self: ContractState, fee: u16) {
+            self.assert_owner();
+            assert!(fee <= MAX_BPS, "invalid-withdrawal-fee");
+            self.withdrawal_fee.write(fee);
+        }
+
+        fn get_withdrawal_fee(self: @ContractState) -> u16 {
+            self.withdrawal_fee.read()
+        }
+
         fn set_performance_fee(ref self: ContractState, fee: u16) {
             self.assert_owner();
             assert!(fee <= MAX_BPS, "invalid-performance-fee");
@@ -555,7 +573,6 @@ pub mod ManagedVault {
 
         fn set_fee_recipient(ref self: ContractState, recipient: ContractAddress) {
             self.assert_owner();
-            assert!(recipient.is_non_zero(), "invalid-fee-recipient");
             self.fee_recipient.write(recipient);
         }
 
@@ -784,7 +801,7 @@ pub mod ManagedVault {
                 // TODO Rounding
                 let fee_amount = (vault_shares * deposit_fee.into()) / MAX_BPS.into();
                 vault_shares -= fee_amount;
-                self.fee_shares.write(self.fee_shares.read() + fee_amount);
+                self.update_fee_shares(fee_amount);
             }
 
             self.erc20._mint(receiver, vault_shares);
@@ -802,7 +819,7 @@ pub mod ManagedVault {
                 // TODO Rounding
                 let fee_amount = (shares * deposit_fee.into()) / MAX_BPS.into();
                 shares -= fee_amount;
-                self.fee_shares.write(self.fee_shares.read() + fee_amount);
+                self.update_fee_shares(fee_amount);
             }
 
             self.erc20._mint(receiver, shares);
@@ -827,8 +844,17 @@ pub mod ManagedVault {
                 per_share_nav = nav_per_share_at_request
             }
 
+            let mut user_shares = shares;
+            let withdraw_fee = self.withdrawal_fee.read();
+            if withdraw_fee > 0 {
+                // TODO Rounding
+                let fee_amount = (user_shares * withdraw_fee.into()) / MAX_BPS.into();
+                user_shares -= fee_amount;
+                self.update_fee_shares(fee_amount);
+            }
+
             println!("per_share_nav: {}", per_share_nav);
-            let assets = (shares * per_share_nav / SCALE) * self.scale.read() / SCALE;
+            let assets = (user_shares * per_share_nav / SCALE) * self.scale.read() / SCALE;
 
             println!("assets: {}", assets);
 
@@ -860,9 +886,13 @@ pub mod ManagedVault {
             let fee_recipient = self.get_fee_recipient();
             assert!(fee_recipient.is_non_zero(), "fee-recipient-not-set");
             assert!(get_caller_address() == fee_recipient, "caller-not-fee-recipient");
-            let shares = self.fee_shares.read();
-            self.erc20._mint(fee_recipient, shares);
-            shares
+            let fee_shares = self.fee_shares.read();
+            // Remove the fees from total supply
+            self.erc20.ERC20_total_supply.write(self.erc20.ERC20_total_supply.read() - fee_shares);
+            // Mint them to the fee recipient
+            self.erc20._mint(fee_recipient, fee_shares);
+
+            fee_shares
         }
     }
 

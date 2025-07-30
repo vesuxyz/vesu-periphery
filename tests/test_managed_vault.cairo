@@ -178,9 +178,7 @@ mod Test_896150_ManagedVault {
     #[available_gas(20000000)]
     #[fork("Mainnet")]
     fn test_managed_vault_deposit() {
-        let TestConfig {
-            singleton, multiply, managed_vault, pool_id, pool_key, eth, usdc, user, ..,
-        } = setup();
+        let TestConfig { managed_vault, vault_erc_20, eth, usdc, user, .. } = setup();
 
         let usdc_balance_before = usdc.balanceOf(user);
 
@@ -188,11 +186,7 @@ mod Test_896150_ManagedVault {
 
         managed_vault.deposit(10000_000_000.into(), user);
         assert!(usdc.balanceOf(managed_vault.contract_address) == 10000_000_000.into());
-        assert!(
-            IERC20Dispatcher { contract_address: managed_vault.contract_address }
-                .balanceOf(user) == 10000
-                * SCALE,
-        );
+        assert!(vault_erc_20.balanceOf(user) == 10000 * SCALE);
 
         let (extension, pool_id) = managed_vault.price_source();
         let price = IExtensionDispatcher { contract_address: extension }
@@ -238,11 +232,7 @@ mod Test_896150_ManagedVault {
 
         assert!(managed_vault.nav() >= 10000 * price.value - 10000000000000);
 
-        managed_vault
-            .request_redeem(
-                IERC20Dispatcher { contract_address: managed_vault.contract_address }
-                    .balanceOf(user),
-            );
+        managed_vault.request_redeem(vault_erc_20.balanceOf(user));
 
         managed_vault.redeem(user, user);
         // assert!(managed_vault.nav() == 0.into());
@@ -311,7 +301,7 @@ mod Test_896150_ManagedVault {
         managed_vault.deposit(amount, user);
 
         assert!(vault_erc_20.balanceOf(fee_recipient) == 0);
-        assert!(managed_vault.pending_fees() * 9 == vault_erc_20.balanceOf(user)); // 10% of 10000
+        assert!(managed_vault.pending_fees() * 9 == vault_erc_20.balanceOf(user));
     }
 
     #[test]
@@ -334,6 +324,83 @@ mod Test_896150_ManagedVault {
         managed_vault.mint(amount, user);
 
         assert!(vault_erc_20.balanceOf(fee_recipient) == 0);
-        assert!(managed_vault.pending_fees() * 9 == vault_erc_20.balanceOf(user)); // 10% of 10000
+        assert!(managed_vault.pending_fees() * 9 == vault_erc_20.balanceOf(user));
+    }
+
+    #[test]
+    #[available_gas(20000000)]
+    #[fork("Mainnet")]
+    fn test_managed_vault_deposit_with_fee() {
+        let TestConfig { managed_vault, eth, vault_erc_20, usdc, user, .. } = setup();
+
+        cheat_caller_address(managed_vault.contract_address, OWNER, CheatSpan::TargetCalls(2));
+        let fee_recipient = 'fee_recipient'.try_into().unwrap();
+        managed_vault.set_performance_fee(10_00); // 10%
+        managed_vault.set_fee_recipient(fee_recipient);
+
+        usdc.approve(managed_vault.contract_address, 10000_000_000.into());
+
+        managed_vault.deposit(10000_000_000.into(), user);
+        assert!(usdc.balanceOf(managed_vault.contract_address) == 10000_000_000.into());
+        assert!(vault_erc_20.balanceOf(user) == 10000 * SCALE);
+
+        let (extension, pool_id) = managed_vault.price_source();
+        let price = IExtensionDispatcher { contract_address: extension }
+            .price(pool_id, usdc.contract_address);
+
+        assert!(managed_vault.nav() >= 10000 * price.value);
+
+        managed_vault
+            .modify_position(
+                pool_id,
+                collateral_asset: usdc.contract_address,
+                debt_asset: eth.contract_address,
+                collateral: Amount {
+                    amount_type: AmountType::Delta,
+                    denomination: AmountDenomination::Assets,
+                    value: I257Trait::new(10000_000_000, false),
+                },
+                debt: Amount {
+                    amount_type: AmountType::Delta,
+                    denomination: AmountDenomination::Assets,
+                    value: I257Trait::new(0, false),
+                },
+            );
+
+        assert!(managed_vault.nav() >= 10000 * price.value - 10000000000000);
+
+        managed_vault
+            .modify_position(
+                pool_id,
+                collateral_asset: usdc.contract_address,
+                debt_asset: eth.contract_address,
+                collateral: Amount {
+                    amount_type: AmountType::Target,
+                    denomination: AmountDenomination::Assets,
+                    value: I257Trait::new(0, false),
+                },
+                debt: Amount {
+                    amount_type: AmountType::Delta,
+                    denomination: AmountDenomination::Assets,
+                    value: I257Trait::new(0, false),
+                },
+            );
+
+        assert!(managed_vault.nav() >= 10000 * price.value - 10000000000000);
+
+        managed_vault.request_redeem(vault_erc_20.balanceOf(user));
+
+        let user_balance_before = vault_erc_20.balanceOf(user);
+        managed_vault.redeem(user, user);
+        println!("user_balance_before: {}", user_balance_before);
+        println!("vault_erc_20.balanceOf(user): {}", managed_vault.pending_fees());
+        assert!(managed_vault.pending_fees() * 9 == user_balance_before);
+
+        cheat_caller_address(
+            managed_vault.contract_address, fee_recipient, CheatSpan::TargetCalls(1),
+        );
+        managed_vault.claim_fees();
+        assert!(vault_erc_20.balanceOf(fee_recipient) == 0);
+        assert!(usdc.balanceOf(fee_recipient) == 0);
     }
 }
