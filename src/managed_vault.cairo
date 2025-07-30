@@ -400,7 +400,8 @@ pub mod ManagedVault {
             ref self: ContractState, asset: ContractAddress, asset_configuration: AssetConfig,
         ) {
             self.assert_owner();
-            assert_asset_config(asset_configuration);
+            // Enabling this assertion would prevent to remove an asset configuration
+            // assert_asset_config(asset_configuration);
 
             for asset_index in 0..self.asset_config.len() {
                 let (read_asset, _) = self.asset_config[asset_index].read();
