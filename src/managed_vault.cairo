@@ -45,6 +45,7 @@ pub trait IManagedVault<TContractState> {
     fn modify_delegation(
         ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool,
     );
+    // TODO Should it be explicit with an option when the asset gotta be removed?
     fn modify_asset_configuration(
         ref self: TContractState, asset: ContractAddress, asset_configuration: AssetConfig,
     );
@@ -58,6 +59,13 @@ pub trait IManagedVault<TContractState> {
     fn set_asset_configuration_parameter(
         ref self: TContractState, asset: ContractAddress, parameter: felt252, value: felt252,
     );
+    fn modify_vault_configuration(
+        ref self: TContractState, vault: ContractAddress, asset_configuration: AssetConfig,
+    );
+    fn get_vault_configuration(
+        self: @TContractState, vault: ContractAddress,
+    ) -> Option<AssetConfig>;
+    fn get_approved_vaults(self: @TContractState) -> Array<(ContractAddress, AssetConfig)>;
 
     // Management functions
     fn claim_rewards(
@@ -185,6 +193,9 @@ pub mod ManagedVault {
         // List of all approved assets and their configuration
         // TODO This could be further improved by using a more efficient data structure
         asset_config: Vec<(ContractAddress, AssetConfig)>,
+        // List of all approved vaults and their configuration
+        // TODO This could be further improved by using a more efficient data structure
+        vault_config: Vec<(ContractAddress, AssetConfig)>,
         // storage for the timestamp manager component
         #[substorage(v0)]
         position_list: position_list_component::Storage,
@@ -392,14 +403,14 @@ pub mod ManagedVault {
                 if asset == read_asset {
                     if asset_configuration != Default::default() {
                         // If the asset configuration is not empty check it is valid
-                        assert_asset_config(asset_configuration);
+                        assert_valid_config(asset_configuration);
                     }
                     self.asset_config[asset_index].write((read_asset, asset_configuration));
                     return;
                 }
             }
             // If the asset configuration does not exist, add it
-            assert_asset_config(asset_configuration);
+            assert_valid_config(asset_configuration);
             self.asset_config.push((asset, asset_configuration));
         }
 
@@ -432,6 +443,55 @@ pub mod ManagedVault {
             approved_assets
         }
 
+        fn modify_vault_configuration(
+            ref self: ContractState, vault: ContractAddress, asset_configuration: AssetConfig,
+        ) {
+            self.assert_owner();
+
+            for vault_index in 0..self.vault_config.len() {
+                let (read_vault, _) = self.vault_config[vault_index].read();
+                if vault == read_vault {
+                    if asset_configuration != Default::default() {
+                        // If the asset configuration is not empty check it is valid
+                        assert_valid_config(asset_configuration);
+                    }
+                    self.vault_config[vault_index].write((read_vault, asset_configuration));
+                    return;
+                }
+            }
+            // If the asset configuration does not exist, add it
+            assert_valid_config(asset_configuration);
+            self.vault_config.push((vault, asset_configuration));
+        }
+
+        fn get_vault_configuration(
+            self: @ContractState, vault: ContractAddress,
+        ) -> Option<AssetConfig> {
+            for vault_index in 0..self.vault_config.len() {
+                let (read_vault, config) = self.vault_config[vault_index].read();
+                if read_vault == vault {
+                    // Asset configuration was removed
+                    if config == Default::default() {
+                        return None;
+                    }
+                    return Some(config);
+                }
+            }
+            None
+        }
+
+        fn get_approved_vaults(self: @ContractState) -> Array<(ContractAddress, AssetConfig)> {
+            let mut approved_vaults = array![];
+            for vault_index in 0..self.vault_config.len() {
+                let (read_vault, config) = self.vault_config[vault_index].read();
+                // Skip if the vault configuration was removed
+                if config == Default::default() {
+                    continue;
+                }
+                approved_vaults.append((read_vault, config));
+            }
+            approved_vaults
+        }
 
         fn set_redemption_timeout(ref self: ContractState, timeout: u64) {
             self.assert_owner();
@@ -517,7 +577,7 @@ pub mod ManagedVault {
                 assert!(false, "invalid-oracle-parameter");
             }
 
-            assert_asset_config(oracle_config);
+            assert_valid_config(oracle_config);
             self.modify_asset_configuration(asset, oracle_config);
             // self.emit(SetOracleParameter { asset, parameter, value });
         }
@@ -792,10 +852,10 @@ pub mod ManagedVault {
         }
     }
 
-    pub fn assert_asset_config(asset_config: AssetConfig) {
-        assert!(asset_config.pragma_key != 0, "pragma-key-must-be-set");
+    pub fn assert_valid_config(configuration: AssetConfig) {
+        assert!(configuration.pragma_key != 0, "pragma-key-must-be-set");
         assert!(
-            asset_config.time_window <= asset_config.start_time_offset,
+            configuration.time_window <= configuration.start_time_offset,
             "time-window-must-be-less-than-start-time-offset",
         );
     }
