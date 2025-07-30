@@ -395,21 +395,15 @@ pub mod ManagedVault {
             self.price_source.read()
         }
 
-
         fn modify_asset_configuration(
             ref self: ContractState, asset: ContractAddress, asset_configuration: AssetConfig,
         ) {
             self.assert_owner();
-            // Enabling this assertion would prevent to remove an asset configuration
-            // assert_asset_config(asset_configuration);
+            assert_asset_config(asset_configuration);
 
             for asset_index in 0..self.asset_config.len() {
                 let (read_asset, _) = self.asset_config[asset_index].read();
-                if asset == read_asset {
-                    // TODO Should we allow to update an existing asset configuration?
-                    self.asset_config[asset_index].write((read_asset, asset_configuration));
-                    return;
-                }
+                assert!(read_asset != asset, "asset-already-configured");
             }
             // If the asset configuration does not exist, add it
             self.asset_config.push((asset, asset_configuration));
