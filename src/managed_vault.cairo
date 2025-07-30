@@ -45,7 +45,7 @@ pub trait IManagedVault<TContractState> {
     fn modify_delegation(
         ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool,
     );
-    fn modify_asset_configuration(
+    fn add_asset_configuration(
         ref self: TContractState, asset: ContractAddress, asset_configuration: AssetConfig,
     );
     fn get_asset_configuration(
@@ -395,7 +395,7 @@ pub mod ManagedVault {
             self.price_source.read()
         }
 
-        fn modify_asset_configuration(
+        fn add_asset_configuration(
             ref self: ContractState, asset: ContractAddress, asset_configuration: AssetConfig,
         ) {
             self.assert_owner();
@@ -510,7 +510,7 @@ pub mod ManagedVault {
             }
 
             assert_asset_config(oracle_config);
-            self.modify_asset_configuration(asset, oracle_config);
+            self.add_asset_configuration(asset, oracle_config);
             // self.emit(SetOracleParameter { asset, parameter, value });
         }
         /////////////////////////
