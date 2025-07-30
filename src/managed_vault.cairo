@@ -45,7 +45,7 @@ pub trait IManagedVault<TContractState> {
     fn modify_delegation(
         ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool,
     );
-    fn add_asset_configuration(
+    fn modify_asset_configuration(
         ref self: TContractState, asset: ContractAddress, asset_configuration: AssetConfig,
     );
     fn get_asset_configuration(
@@ -250,19 +250,6 @@ pub mod ManagedVault {
             assert!(self.get_asset_configuration(asset).is_some(), "asset-not-approved");
         }
 
-        fn get_approved_assets(self: @ContractState) -> Array<(ContractAddress, AssetConfig)> {
-            let mut approved_assets = array![];
-            for asset_index in 0..self.asset_config.len() {
-                let (read_asset, config) = self.asset_config[asset_index].read();
-                // Skip if the asset configuration was removed
-                if config == Default::default() {
-                    continue;
-                }
-                approved_assets.append((read_asset, config));
-            }
-            approved_assets
-        }
-
         #[inline(always)]
         fn balance_of_self(self: @ContractState, asset: ContractAddress, is_legacy: bool) -> u256 {
             if is_legacy {
@@ -395,17 +382,24 @@ pub mod ManagedVault {
             self.price_source.read()
         }
 
-        fn add_asset_configuration(
+        fn modify_asset_configuration(
             ref self: ContractState, asset: ContractAddress, asset_configuration: AssetConfig,
         ) {
             self.assert_owner();
-            assert_asset_config(asset_configuration);
 
             for asset_index in 0..self.asset_config.len() {
                 let (read_asset, _) = self.asset_config[asset_index].read();
-                assert!(read_asset != asset, "asset-already-configured");
+                if asset == read_asset {
+                    if asset_configuration != Default::default() {
+                        // If the asset configuration is not empty check it is valid
+                        assert_asset_config(asset_configuration);
+                    }
+                    self.asset_config[asset_index].write((read_asset, asset_configuration));
+                    return;
+                }
             }
             // If the asset configuration does not exist, add it
+            assert_asset_config(asset_configuration);
             self.asset_config.push((asset, asset_configuration));
         }
 
@@ -424,6 +418,20 @@ pub mod ManagedVault {
             }
             None
         }
+
+        fn get_approved_assets(self: @ContractState) -> Array<(ContractAddress, AssetConfig)> {
+            let mut approved_assets = array![];
+            for asset_index in 0..self.asset_config.len() {
+                let (read_asset, config) = self.asset_config[asset_index].read();
+                // Skip if the asset configuration was removed
+                if config == Default::default() {
+                    continue;
+                }
+                approved_assets.append((read_asset, config));
+            }
+            approved_assets
+        }
+
 
         fn set_redemption_timeout(ref self: ContractState, timeout: u64) {
             self.assert_owner();
@@ -510,7 +518,7 @@ pub mod ManagedVault {
             }
 
             assert_asset_config(oracle_config);
-            self.add_asset_configuration(asset, oracle_config);
+            self.modify_asset_configuration(asset, oracle_config);
             // self.emit(SetOracleParameter { asset, parameter, value });
         }
         /////////////////////////
