@@ -348,8 +348,9 @@ mod Test_896150_ManagedVault {
         assert!(managed_vault2.nav() > 0);
 
         managed_vault.request_redeem_from_vault(managed_vault2.contract_address, usdc_value / 2);
-        managed_vault.redeem_from_vault(managed_vault2.contract_address);
+        let x = managed_vault.redeem_from_vault(managed_vault2.contract_address);
 
+        println!("Redeem response: {:?}", x);
         println!("USDC balance after redeem: {}", usdc.balanceOf(managed_vault.contract_address));
         println!("managed_vault2.nav(): {}", managed_vault2.nav());
         assert!(usdc.balanceOf(managed_vault.contract_address) == usdc_value);
