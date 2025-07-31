@@ -29,7 +29,7 @@ trait IERC4626<TContractState> {
 }
 
 #[starknet::interface]
-trait IERC7540<TContractState> {
+pub trait IERC7540<TContractState> {
     fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
     fn mint(ref self: TContractState, shares: u256, receiver: ContractAddress) -> u256;
 
@@ -64,7 +64,6 @@ pub trait IManagedVault<TContractState> {
     fn get_approved_assets(self: @TContractState) -> Array<(ContractAddress, AssetConfig)>;
     fn pragma_oracle(self: @TContractState) -> ContractAddress;
     fn set_oracle(ref self: TContractState, oracle_address: ContractAddress);
-    fn price(self: @TContractState, asset: ContractAddress) -> AssetPrice;
     fn set_asset_configuration_parameter(
         ref self: TContractState, asset: ContractAddress, parameter: felt252, value: felt252,
     );
@@ -287,6 +286,40 @@ pub mod ManagedVault {
             }
         }
 
+        fn price(self: @ContractState, asset_config: AssetConfig) -> AssetPrice {
+            let AssetConfig {
+                pragma_key,
+                timeout,
+                number_of_sources,
+                start_time_offset,
+                time_window,
+                aggregation_mode,
+                ..,
+            } = asset_config;
+            let dispatcher = IPragmaABIDispatcher {
+                contract_address: self.pragma_oracle_address.read(),
+            };
+            let response = dispatcher.get_data(DataType::SpotEntry(pragma_key), aggregation_mode);
+
+            // calculate the twap if start_time_offset and time_window are set
+            assert!(start_time_offset != 0, "start-time-offset-must-be-set");
+            assert!(time_window != 0, "time-window-must-be-set");
+            let value = response.price.into() * SCALE / pow_10(response.decimals.into());
+
+            // ensure that price is not stale and that the number of sources is sufficient
+            let time_delta = if response.last_updated_timestamp >= get_block_timestamp() {
+                0
+            } else {
+                get_block_timestamp() - response.last_updated_timestamp
+            };
+            let is_valid = (timeout == 0 || (timeout != 0 && time_delta <= timeout))
+                && (number_of_sources == 0
+                    || (number_of_sources != 0
+                        && number_of_sources <= response.num_sources_aggregated));
+
+            AssetPrice { value, is_valid }
+        }
+
         fn assert_fair_rate(
             self: @ContractState,
             sell_token: ContractAddress,
@@ -294,8 +327,10 @@ pub mod ManagedVault {
             buy_token: ContractAddress,
             buy_amount: u256,
         ) {
-            let price_sell = self.price(sell_token);
-            let price_buy = self.price(buy_token);
+            let price_sell = self
+                .price(self.get_asset_configuration(sell_token).expect('sell-not-approved'));
+            let price_buy = self
+                .price(self.get_asset_configuration(buy_token).expect('buy-not-approved'));
             assert_price(price_sell);
             assert_price(price_buy);
             // TODO Protect this with a read-only lock?
@@ -530,40 +565,6 @@ pub mod ManagedVault {
             self.assert_owner();
             assert!(self.pragma_oracle_address.read().is_zero(), "oracle-already-initialized");
             self.pragma_oracle_address.write(oracle_address);
-        }
-
-        fn price(self: @ContractState, asset: ContractAddress) -> AssetPrice {
-            let AssetConfig {
-                pragma_key,
-                timeout,
-                number_of_sources,
-                start_time_offset,
-                time_window,
-                aggregation_mode,
-                ..,
-            } = self.get_asset_configuration(asset).expect('asset-not-approved');
-            let dispatcher = IPragmaABIDispatcher {
-                contract_address: self.pragma_oracle_address.read(),
-            };
-            let response = dispatcher.get_data(DataType::SpotEntry(pragma_key), aggregation_mode);
-
-            // calculate the twap if start_time_offset and time_window are set
-            assert!(start_time_offset != 0, "start-time-offset-must-be-set");
-            assert!(time_window != 0, "time-window-must-be-set");
-            let value = response.price.into() * SCALE / pow_10(response.decimals.into());
-
-            // ensure that price is not stale and that the number of sources is sufficient
-            let time_delta = if response.last_updated_timestamp >= get_block_timestamp() {
-                0
-            } else {
-                get_block_timestamp() - response.last_updated_timestamp
-            };
-            let is_valid = (timeout == 0 || (timeout != 0 && time_delta <= timeout))
-                && (number_of_sources == 0
-                    || (number_of_sources != 0
-                        && number_of_sources <= response.num_sources_aggregated));
-
-            AssetPrice { value, is_valid }
         }
 
         fn set_asset_configuration_parameter(
@@ -831,7 +832,7 @@ pub mod ManagedVault {
                 }
                 let AssetConfig { is_legacy, scale, .. } = config;
                 let balance = self.balance_of_self(read_asset, is_legacy);
-                let asset_price = self.price(read_asset);
+                let asset_price = self.price(config);
                 assert_price(asset_price);
                 assets += balance * asset_price.value / scale;
             }
@@ -845,7 +846,7 @@ pub mod ManagedVault {
                 }
                 let AssetConfig { is_legacy, scale, .. } = config;
                 let balance = self.balance_of_self(read_asset, is_legacy);
-                let asset_price = self.price(read_asset);
+                let asset_price = self.price(config);
                 assert_price(asset_price);
                 assets += balance * asset_price.value / scale;
             }
@@ -883,6 +884,9 @@ pub mod ManagedVault {
                 .redemption_requests
                 .read(owner);
 
+            println!("timestamp: {}", timestamp);
+            println!("shares: {}", shares);
+            println!("redemption_timeout: {}", self.redemption_timeout.read());
             assert!(
                 timestamp + self.redemption_timeout.read() >= get_block_timestamp(),
                 "redeem-timeout",

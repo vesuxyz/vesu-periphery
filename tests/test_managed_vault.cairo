@@ -20,7 +20,8 @@ mod Test_896150_ManagedVault {
     use vesu::units::SCALE;
     use vesu::vendor::pragma::AggregationMode;
     use vesu_periphery::managed_vault::{
-        AssetConfig, IManagedVaultDispatcher, IManagedVaultDispatcherTrait,
+        AssetConfig, IERC7540Dispatcher, IERC7540DispatcherTrait, IManagedVaultDispatcher,
+        IManagedVaultDispatcherTrait,
     };
     use vesu_periphery::multiply::IMultiplyDispatcher;
     use super::{IStarkgateERC20Dispatcher, IStarkgateERC20DispatcherTrait};
@@ -28,16 +29,31 @@ mod Test_896150_ManagedVault {
     const MIN_SQRT_RATIO_LIMIT: u256 = 18446748437148339061;
     const MAX_SQRT_RATIO_LIMIT: u256 = 6277100250585753475930931601400621808602321654880405518632;
 
+    const usdc: IERC20Dispatcher = IERC20Dispatcher {
+        contract_address: 0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
+            .try_into()
+            .unwrap(),
+    };
+
+    const usdt: IERC20Dispatcher = IERC20Dispatcher {
+        contract_address: 0x068f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8
+            .try_into()
+            .unwrap(),
+    };
+
+    const eth: IERC20Dispatcher = IERC20Dispatcher {
+        contract_address: 0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
+            .try_into()
+            .unwrap(),
+    };
     struct TestConfig {
         ekubo: ICoreDispatcher,
         singleton: ISingletonV2Dispatcher,
         multiply: IMultiplyDispatcher,
         managed_vault: IManagedVaultDispatcher,
+        managed_vault_erc7540: IERC7540Dispatcher,
         pool_id: felt252,
         pool_key: PoolKey,
-        eth: IERC20Dispatcher,
-        usdc: IERC20Dispatcher,
-        usdt: IERC20Dispatcher,
         user: ContractAddress,
     }
 
@@ -59,21 +75,6 @@ mod Test_896150_ManagedVault {
             ),
         };
 
-        let eth = IERC20Dispatcher {
-            contract_address: 0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7
-                .try_into()
-                .unwrap(),
-        };
-        let usdc = IERC20Dispatcher {
-            contract_address: 0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8
-                .try_into()
-                .unwrap(),
-        };
-        let usdt = IERC20Dispatcher {
-            contract_address: 0x068f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8
-                .try_into()
-                .unwrap(),
-        };
         // let strk = IERC20Dispatcher {
         //     contract_address: contract_address_const::<
         //         0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d
@@ -157,8 +158,18 @@ mod Test_896150_ManagedVault {
                 },
             );
 
+        let managed_vault_erc7540 = IERC7540Dispatcher {
+            contract_address: managed_vault.contract_address,
+        };
         TestConfig {
-            ekubo, singleton, multiply, managed_vault, pool_id, pool_key, eth, usdc, usdt, user,
+            ekubo,
+            singleton,
+            multiply,
+            managed_vault,
+            managed_vault_erc7540,
+            pool_id,
+            pool_key,
+            user,
         }
     }
 
@@ -167,14 +178,14 @@ mod Test_896150_ManagedVault {
     #[fork("Mainnet")]
     fn test_managed_vault_deposit() {
         let TestConfig {
-            singleton, multiply, managed_vault, pool_id, pool_key, eth, usdc, user, ..,
+            singleton, multiply, managed_vault, managed_vault_erc7540, pool_id, pool_key, user, ..,
         } = setup();
 
         let usdc_balance_before = usdc.balanceOf(user);
 
         usdc.approve(managed_vault.contract_address, 10000_000_000.into());
 
-        managed_vault.deposit(10000_000_000.into(), user);
+        managed_vault_erc7540.deposit(10000_000_000.into(), user);
         assert!(usdc.balanceOf(managed_vault.contract_address) == 10000_000_000.into());
         assert!(
             IERC20Dispatcher { contract_address: managed_vault.contract_address }
@@ -226,13 +237,13 @@ mod Test_896150_ManagedVault {
 
         assert!(managed_vault.nav() >= 10000 * price.value - 10000000000000);
 
-        managed_vault
+        managed_vault_erc7540
             .request_redeem(
                 IERC20Dispatcher { contract_address: managed_vault.contract_address }
                     .balanceOf(user),
             );
 
-        managed_vault.redeem(user, user);
+        managed_vault_erc7540.redeem(user, user);
         // assert!(managed_vault.nav() == 0.into());
 
         // singleton.modify_delegation(pool_id, multiply.contract_address, true);
@@ -277,5 +288,66 @@ mod Test_896150_ManagedVault {
         // assert!(
     //     usdc.balanceOf(user) == usdc_balance_before - increase_lever_params.add_margin.into()
     // );
+    }
+
+
+    #[test]
+    #[available_gas(20000000)]
+    #[fork("Mainnet")]
+    fn test_managed_vault_deposit_to_vault() {
+        let TestConfig { managed_vault, managed_vault_erc7540, user, .. } = setup();
+        let TestConfig { managed_vault: managed_vault2, .. } = setup();
+        let is_legacy = false;
+
+        let usdc_balance_before = usdc.balanceOf(managed_vault.contract_address);
+        let usdc_value = 10000_000_000;
+        assert!(usdc_balance_before == 0);
+        assert!(managed_vault.nav() == 0);
+        usdc.approve(managed_vault.contract_address, usdc_value);
+
+        managed_vault_erc7540.deposit(usdc_value, user);
+        let usdc_balance_after = usdc.balanceOf(managed_vault.contract_address);
+        assert!(usdc_balance_after == usdc_value);
+        cheat_caller_address(
+            managed_vault.contract_address, get_contract_address(), CheatSpan::TargetCalls(1),
+        );
+        managed_vault
+            .modify_vault_configuration(
+                managed_vault2.contract_address,
+                AssetConfig {
+                    is_legacy,
+                    scale: 1_000_000_000,
+                    pragma_key: 'USDC/USD',
+                    timeout: 60,
+                    number_of_sources: 1,
+                    start_time_offset: 1,
+                    time_window: 1,
+                    aggregation_mode: AggregationMode::Median,
+                },
+            );
+
+        assert!(managed_vault.nav() == 0);
+        // assert!(managed_vault2.nav() == 0);
+
+        cheat_caller_address(
+            managed_vault.contract_address, get_contract_address(), CheatSpan::TargetCalls(1),
+        );
+
+        let vault2_ierc20 = IERC20Dispatcher { contract_address: managed_vault2.contract_address };
+        assert!(vault2_ierc20.balanceOf(managed_vault.contract_address) == 0);
+        managed_vault
+            .deposit_to_vault(
+                managed_vault2.contract_address, usdc.contract_address, usdc_value / 2,
+            );
+
+        assert!(usdc.balanceOf(managed_vault.contract_address) == usdc_value / 2);
+        // Since they all have the same amount, and scale we can expect the balance to be halved
+        assert!(vault2_ierc20.balanceOf(managed_vault.contract_address) > 0);
+        assert!(usdc.balanceOf(managed_vault2.contract_address) == usdc_value / 2);
+
+        managed_vault.request_redeem_from_vault(managed_vault2.contract_address, usdc_value / 2);
+        // managed_vault.redeem_from_vault(managed_vault2.contract_address);
+
+        // assert!(usdc.balanceOf(managed_vault.contract_address) == usdc_value);
     }
 }
