@@ -1,5 +1,5 @@
 use starknet::ContractAddress;
-use vesu::data_model::{Amount, AssetPrice, UpdatePositionResponse};
+use vesu::data_model::{Amount, UpdatePositionResponse};
 use vesu::vendor::pragma::AggregationMode;
 use vesu_periphery::multiply::{ModifyLeverParams, ModifyLeverResponse};
 use vesu_periphery::swap::Swap;
@@ -28,6 +28,15 @@ trait IERC4626<TContractState> {
     ) -> u256;
 }
 
+#[starknet::interface]
+pub trait IERC7540<TContractState> {
+    fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
+    fn mint(ref self: TContractState, shares: u256, receiver: ContractAddress) -> u256;
+
+    fn redeem(ref self: TContractState, receiver: ContractAddress, owner: ContractAddress) -> u256;
+    fn request_redeem(ref self: TContractState, shares: u256);
+}
+
 #[derive(Drop, Copy, Serde)]
 pub struct Claim {
     pub id: u64,
@@ -45,6 +54,7 @@ pub trait IManagedVault<TContractState> {
     fn modify_delegation(
         ref self: TContractState, pool_id: felt252, delegatee: ContractAddress, delegation: bool,
     );
+    // TODO Should it be explicit with an option when the asset gotta be removed?
     fn modify_asset_configuration(
         ref self: TContractState, asset: ContractAddress, asset_configuration: AssetConfig,
     );
@@ -54,10 +64,16 @@ pub trait IManagedVault<TContractState> {
     fn get_approved_assets(self: @TContractState) -> Array<(ContractAddress, AssetConfig)>;
     fn pragma_oracle(self: @TContractState) -> ContractAddress;
     fn set_oracle(ref self: TContractState, oracle_address: ContractAddress);
-    fn price(self: @TContractState, asset: ContractAddress) -> AssetPrice;
     fn set_asset_configuration_parameter(
         ref self: TContractState, asset: ContractAddress, parameter: felt252, value: felt252,
     );
+    fn modify_vault_configuration(
+        ref self: TContractState, vault: ContractAddress, asset_configuration: AssetConfig,
+    );
+    fn get_vault_configuration(
+        self: @TContractState, vault: ContractAddress,
+    ) -> Option<AssetConfig>;
+    fn get_approved_vaults(self: @TContractState) -> Array<(ContractAddress, AssetConfig)>;
 
     // Management functions
     fn claim_rewards(
@@ -78,14 +94,17 @@ pub trait IManagedVault<TContractState> {
     fn modify_lever(
         ref self: TContractState, modify_lever_params: ModifyLeverParams,
     ) -> ModifyLeverResponse;
+    fn deposit_to_vault(
+        ref self: TContractState,
+        vault: ContractAddress,
+        asset_address: ContractAddress,
+        assets: u256,
+    ) -> u256;
+    fn request_redeem_from_vault(ref self: TContractState, vault: ContractAddress, shares: u256);
+    fn redeem_from_vault(ref self: TContractState, vault: ContractAddress) -> u256;
+
+    // Other
     fn nav(self: @TContractState) -> u256;
-
-    // User related functions
-    fn deposit(ref self: TContractState, assets: u256, receiver: ContractAddress) -> u256;
-    fn mint(ref self: TContractState, shares: u256, receiver: ContractAddress) -> u256;
-
-    fn redeem(ref self: TContractState, receiver: ContractAddress, owner: ContractAddress) -> u256;
-    fn request_redeem(ref self: TContractState, shares: u256);
 }
 
 #[starknet::interface]
@@ -132,7 +151,8 @@ pub mod ManagedVault {
     use vesu::vendor::erc20_component::ERC20Component;
     use vesu::vendor::pragma::{DataType, IPragmaABIDispatcher, IPragmaABIDispatcherTrait};
     use vesu_periphery::managed_vault::{
-        AssetConfig, Claim, IManagedVault, IMerkleDistributorDispatcher,
+        AssetConfig, Claim, IERC4626Dispatcher, IERC4626DispatcherTrait, IERC7540,
+        IERC7540Dispatcher, IERC7540DispatcherTrait, IManagedVault, IMerkleDistributorDispatcher,
         IMerkleDistributorDispatcherTrait, SwapParams,
     };
     use vesu_periphery::multiply::{
@@ -185,6 +205,9 @@ pub mod ManagedVault {
         // List of all approved assets and their configuration
         // TODO This could be further improved by using a more efficient data structure
         asset_config: Vec<(ContractAddress, AssetConfig)>,
+        // List of all approved vaults and their configuration
+        // TODO This could be further improved by using a more efficient data structure
+        vault_config: Vec<(ContractAddress, AssetConfig)>,
         // storage for the timestamp manager component
         #[substorage(v0)]
         position_list: position_list_component::Storage,
@@ -250,6 +273,10 @@ pub mod ManagedVault {
             assert!(self.get_asset_configuration(asset).is_some(), "asset-not-approved");
         }
 
+        fn assert_vault_approved(self: @ContractState, vault: ContractAddress) {
+            assert!(self.get_vault_configuration(vault).is_some(), "vault-not-approved");
+        }
+
         #[inline(always)]
         fn balance_of_self(self: @ContractState, asset: ContractAddress, is_legacy: bool) -> u256 {
             if is_legacy {
@@ -259,6 +286,40 @@ pub mod ManagedVault {
             }
         }
 
+        fn price(self: @ContractState, asset_config: AssetConfig) -> AssetPrice {
+            let AssetConfig {
+                pragma_key,
+                timeout,
+                number_of_sources,
+                start_time_offset,
+                time_window,
+                aggregation_mode,
+                ..,
+            } = asset_config;
+            let dispatcher = IPragmaABIDispatcher {
+                contract_address: self.pragma_oracle_address.read(),
+            };
+            let response = dispatcher.get_data(DataType::SpotEntry(pragma_key), aggregation_mode);
+
+            // calculate the twap if start_time_offset and time_window are set
+            assert!(start_time_offset != 0, "start-time-offset-must-be-set");
+            assert!(time_window != 0, "time-window-must-be-set");
+            let value = response.price.into() * SCALE / pow_10(response.decimals.into());
+
+            // ensure that price is not stale and that the number of sources is sufficient
+            let time_delta = if response.last_updated_timestamp >= get_block_timestamp() {
+                0
+            } else {
+                get_block_timestamp() - response.last_updated_timestamp
+            };
+            let is_valid = (timeout == 0 || (timeout != 0 && time_delta <= timeout))
+                && (number_of_sources == 0
+                    || (number_of_sources != 0
+                        && number_of_sources <= response.num_sources_aggregated));
+
+            AssetPrice { value, is_valid }
+        }
+
         fn assert_fair_rate(
             self: @ContractState,
             sell_token: ContractAddress,
@@ -266,8 +327,10 @@ pub mod ManagedVault {
             buy_token: ContractAddress,
             buy_amount: u256,
         ) {
-            let price_sell = self.price(sell_token);
-            let price_buy = self.price(buy_token);
+            let price_sell = self
+                .price(self.get_asset_configuration(sell_token).expect('sell-not-approved'));
+            let price_buy = self
+                .price(self.get_asset_configuration(buy_token).expect('buy-not-approved'));
             assert_price(price_sell);
             assert_price(price_buy);
             // TODO Protect this with a read-only lock?
@@ -392,14 +455,14 @@ pub mod ManagedVault {
                 if asset == read_asset {
                     if asset_configuration != Default::default() {
                         // If the asset configuration is not empty check it is valid
-                        assert_asset_config(asset_configuration);
+                        assert_valid_config(asset_configuration);
                     }
                     self.asset_config[asset_index].write((read_asset, asset_configuration));
                     return;
                 }
             }
             // If the asset configuration does not exist, add it
-            assert_asset_config(asset_configuration);
+            assert_valid_config(asset_configuration);
             self.asset_config.push((asset, asset_configuration));
         }
 
@@ -432,6 +495,55 @@ pub mod ManagedVault {
             approved_assets
         }
 
+        fn modify_vault_configuration(
+            ref self: ContractState, vault: ContractAddress, asset_configuration: AssetConfig,
+        ) {
+            self.assert_owner();
+
+            for vault_index in 0..self.vault_config.len() {
+                let (read_vault, _) = self.vault_config[vault_index].read();
+                if vault == read_vault {
+                    if asset_configuration != Default::default() {
+                        // If the asset configuration is not empty check it is valid
+                        assert_valid_config(asset_configuration);
+                    }
+                    self.vault_config[vault_index].write((read_vault, asset_configuration));
+                    return;
+                }
+            }
+            // If the asset configuration does not exist, add it
+            assert_valid_config(asset_configuration);
+            self.vault_config.push((vault, asset_configuration));
+        }
+
+        fn get_vault_configuration(
+            self: @ContractState, vault: ContractAddress,
+        ) -> Option<AssetConfig> {
+            for vault_index in 0..self.vault_config.len() {
+                let (read_vault, config) = self.vault_config[vault_index].read();
+                if read_vault == vault {
+                    // Asset configuration was removed
+                    if config == Default::default() {
+                        return None;
+                    }
+                    return Some(config);
+                }
+            }
+            None
+        }
+
+        fn get_approved_vaults(self: @ContractState) -> Array<(ContractAddress, AssetConfig)> {
+            let mut approved_vaults = array![];
+            for vault_index in 0..self.vault_config.len() {
+                let (read_vault, config) = self.vault_config[vault_index].read();
+                // Skip if the vault configuration was removed
+                if config == Default::default() {
+                    continue;
+                }
+                approved_vaults.append((read_vault, config));
+            }
+            approved_vaults
+        }
 
         fn set_redemption_timeout(ref self: ContractState, timeout: u64) {
             self.assert_owner();
@@ -453,40 +565,6 @@ pub mod ManagedVault {
             self.assert_owner();
             assert!(self.pragma_oracle_address.read().is_zero(), "oracle-already-initialized");
             self.pragma_oracle_address.write(oracle_address);
-        }
-
-        fn price(self: @ContractState, asset: ContractAddress) -> AssetPrice {
-            let AssetConfig {
-                pragma_key,
-                timeout,
-                number_of_sources,
-                start_time_offset,
-                time_window,
-                aggregation_mode,
-                ..,
-            } = self.get_asset_configuration(asset).expect('asset-not-approved');
-            let dispatcher = IPragmaABIDispatcher {
-                contract_address: self.pragma_oracle_address.read(),
-            };
-            let response = dispatcher.get_data(DataType::SpotEntry(pragma_key), aggregation_mode);
-
-            // calculate the twap if start_time_offset and time_window are set
-            assert!(start_time_offset != 0, "start-time-offset-must-be-set");
-            assert!(time_window != 0, "time-window-must-be-set");
-            let value = response.price.into() * SCALE / pow_10(response.decimals.into());
-
-            // ensure that price is not stale and that the number of sources is sufficient
-            let time_delta = if response.last_updated_timestamp >= get_block_timestamp() {
-                0
-            } else {
-                get_block_timestamp() - response.last_updated_timestamp
-            };
-            let is_valid = (timeout == 0 || (timeout != 0 && time_delta <= timeout))
-                && (number_of_sources == 0
-                    || (number_of_sources != 0
-                        && number_of_sources <= response.num_sources_aggregated));
-
-            AssetPrice { value, is_valid }
         }
 
         fn set_asset_configuration_parameter(
@@ -517,10 +595,11 @@ pub mod ManagedVault {
                 assert!(false, "invalid-oracle-parameter");
             }
 
-            assert_asset_config(oracle_config);
+            assert_valid_config(oracle_config);
             self.modify_asset_configuration(asset, oracle_config);
             // self.emit(SetOracleParameter { asset, parameter, value });
         }
+
         /////////////////////////
         // Manager functions
         /////////////////////////
@@ -680,6 +759,43 @@ pub mod ManagedVault {
             response
         }
 
+        fn deposit_to_vault(
+            ref self: ContractState,
+            vault: ContractAddress,
+            asset_address: ContractAddress,
+            assets: u256,
+        ) -> u256 {
+            self.assert_manager();
+            self.assert_vault_approved(vault);
+            self.assert_asset_approved(asset_address);
+
+            let erc20_dispatcher = IERC20Dispatcher { contract_address: asset_address };
+            erc20_dispatcher.approve(vault, assets);
+            let shares = IERC4626Dispatcher { contract_address: vault }
+                .deposit(assets, get_contract_address());
+            erc20_dispatcher.approve(vault, 0);
+
+            shares
+        }
+
+        fn request_redeem_from_vault(
+            ref self: ContractState, vault: ContractAddress, shares: u256,
+        ) {
+            self.assert_manager();
+            self.assert_vault_approved(vault);
+            IERC7540Dispatcher { contract_address: vault }.request_redeem(shares);
+        }
+
+        // As redeem can be called by anyone and on behalf of anyone, should we assert_manager?
+        // We should ensure vault is approved to make sure this contract doesn't call a random
+        // contract
+        fn redeem_from_vault(ref self: ContractState, vault: ContractAddress) -> u256 {
+            self.assert_manager();
+            self.assert_vault_approved(vault);
+            let this = get_contract_address();
+            IERC7540Dispatcher { contract_address: vault }.redeem(this, this)
+        }
+
         fn nav(self: @ContractState) -> u256 {
             let singleton = self.singleton.read();
             let this = get_contract_address();
@@ -708,13 +824,7 @@ pub mod ManagedVault {
             assets += balance * price.value / self.scale.read();
 
             // Loop through all approved assets and add their value
-            for asset_index in 0..self.asset_config.len() {
-                let (read_asset, config) = self.asset_config[asset_index].read();
-                // Skip if the asset configuration was removed
-                if config == Default::default() {
-                    continue;
-                }
-
+            for (read_asset, config) in self.get_approved_assets() {
                 // Skip if the asset is the vault's underlying asset
                 // This is important to avoid double counting the asset
                 if read_asset == asset.contract_address {
@@ -722,14 +832,31 @@ pub mod ManagedVault {
                 }
                 let AssetConfig { is_legacy, scale, .. } = config;
                 let balance = self.balance_of_self(read_asset, is_legacy);
-                let asset_price = self.price(read_asset);
+                let asset_price = self.price(config);
+                assert_price(asset_price);
+                assets += balance * asset_price.value / scale;
+            }
+
+            // Loop through all approved vaults and add their value
+            for (read_asset, config) in self.get_approved_vaults() {
+                // Skip if the asset is the vault's underlying asset
+                // This is important to avoid double counting the asset
+                if read_asset == asset.contract_address {
+                    continue;
+                }
+                let AssetConfig { is_legacy, scale, .. } = config;
+                let balance = self.balance_of_self(read_asset, is_legacy);
+                let asset_price = self.price(config);
                 assert_price(asset_price);
                 assets += balance * asset_price.value / scale;
             }
 
             assets - liabilities
         }
+    }
 
+    #[abi(embed_v0)]
+    impl ERC7540Impl of IERC7540<ContractState> {
         fn deposit(ref self: ContractState, assets: u256, receiver: ContractAddress) -> u256 {
             self.transfer_asset(get_caller_address(), get_contract_address(), assets);
 
@@ -792,10 +919,10 @@ pub mod ManagedVault {
         }
     }
 
-    pub fn assert_asset_config(asset_config: AssetConfig) {
-        assert!(asset_config.pragma_key != 0, "pragma-key-must-be-set");
+    pub fn assert_valid_config(configuration: AssetConfig) {
+        assert!(configuration.pragma_key != 0, "pragma-key-must-be-set");
         assert!(
-            asset_config.time_window <= asset_config.start_time_offset,
+            configuration.time_window <= configuration.start_time_offset,
             "time-window-must-be-less-than-start-time-offset",
         );
     }
