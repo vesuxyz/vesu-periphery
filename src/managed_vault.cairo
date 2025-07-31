@@ -1,5 +1,5 @@
 use starknet::ContractAddress;
-use vesu::data_model::{Amount, AssetPrice, UpdatePositionResponse};
+use vesu::data_model::{Amount, UpdatePositionResponse};
 use vesu::vendor::pragma::AggregationMode;
 use vesu_periphery::multiply::{ModifyLeverParams, ModifyLeverResponse};
 use vesu_periphery::swap::Swap;
@@ -884,9 +884,6 @@ pub mod ManagedVault {
                 .redemption_requests
                 .read(owner);
 
-            println!("timestamp: {}", timestamp);
-            println!("shares: {}", shares);
-            println!("redemption_timeout: {}", self.redemption_timeout.read());
             assert!(
                 timestamp + self.redemption_timeout.read() >= get_block_timestamp(),
                 "redeem-timeout",

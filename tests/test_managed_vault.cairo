@@ -318,7 +318,7 @@ mod Test_896150_ManagedVault {
                     is_legacy,
                     scale: 1_000_000_000,
                     pragma_key: 'USDC/USD',
-                    timeout: 60,
+                    timeout: 90,
                     number_of_sources: 1,
                     start_time_offset: 1,
                     time_window: 1,
@@ -326,8 +326,8 @@ mod Test_896150_ManagedVault {
                 },
             );
 
-        assert!(managed_vault.nav() == 0);
-        // assert!(managed_vault2.nav() == 0);
+        assert!(managed_vault.nav() > 0);
+        assert!(managed_vault2.nav() == 0);
 
         cheat_caller_address(
             managed_vault.contract_address, get_contract_address(), CheatSpan::TargetCalls(1),
@@ -344,10 +344,16 @@ mod Test_896150_ManagedVault {
         // Since they all have the same amount, and scale we can expect the balance to be halved
         assert!(vault2_ierc20.balanceOf(managed_vault.contract_address) > 0);
         assert!(usdc.balanceOf(managed_vault2.contract_address) == usdc_value / 2);
+        assert!(managed_vault.nav() > 0);
+        assert!(managed_vault2.nav() > 0);
 
         managed_vault.request_redeem_from_vault(managed_vault2.contract_address, usdc_value / 2);
-        // managed_vault.redeem_from_vault(managed_vault2.contract_address);
+        managed_vault.redeem_from_vault(managed_vault2.contract_address);
 
-        // assert!(usdc.balanceOf(managed_vault.contract_address) == usdc_value);
+        println!("USDC balance after redeem: {}", usdc.balanceOf(managed_vault.contract_address));
+        println!("managed_vault2.nav(): {}", managed_vault2.nav());
+        assert!(usdc.balanceOf(managed_vault.contract_address) == usdc_value);
+        assert!(managed_vault.nav() > 0);
+        assert!(managed_vault2.nav() == 0);
     }
 }
